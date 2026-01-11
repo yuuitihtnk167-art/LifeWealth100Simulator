@@ -1,0 +1,426 @@
+﻿<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LifeWealth 100 Simulator</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <p class="eyebrow">LifeWealth 100 Simulator</p>
+      <h1>100歳時点の資産を、いまの前提で正確に確認</h1>
+      <p class="subtext">月次の運用と収支を反映します。</p>
+      <nav class="page-tabs" aria-label="パラメーター選択">
+        <button class="tab-button is-active" type="button" data-page="core">基本</button>
+        <button class="tab-button" type="button" data-page="import">インポート</button>
+        <button class="tab-button" type="button" data-page="cashflow">現役の支出・収入</button>
+        <button class="tab-button" type="button" data-page="retire-cashflow">定年後の支出・収入</button>
+        <button class="tab-button" type="button" data-page="investment">投資</button>
+      </nav>
+    </header>
+
+    <main class="content">
+      <section class="card inputs page" data-page="core">
+        <h2>入力</h2>
+        <label>
+          誕生日
+          <input id="birthDate" type="date" required>
+        </label>
+        <label>
+          現在の資産総額（円）
+          <input id="currentAssets" type="number" min="0" step="10000" value="15000000" required>
+        </label>
+        <label>
+          想定運用利回り（年率 %）
+          <input id="annualRate" type="number" min="-100" max="100" step="0.1" value="3" required>
+        </label>
+        <button id="applyImport" type="button">貼り付けデータで資産更新</button>
+        <button id="exportCsv" type="button">年次CSVをダウンロード</button>
+        <p class="import-status" id="importStatus">未取り込み</p>
+      </section>
+
+      <section class="card result page" data-page="core" aria-live="polite">
+        <h2>100歳時点の資産残高</h2>
+        <div class="result-value" id="resultValue">-</div>
+        <div class="result-meta" id="resultMeta">前提を入力してください。</div>
+      </section>
+
+      <section class="card import page" data-page="import">
+        <h2>データ取り込み（任意）</h2>
+        <label>
+          資産一覧（表データを貼り付け）
+          <textarea id="assetData" rows="6" placeholder="資産区分\t大分類\t...\t金額(円)\t..."></textarea>
+        </label>
+        <label>
+          資産推移（月次など）（表データを貼り付け）
+          <textarea id="summaryData" rows="4" placeholder="日付\t合計（円）\t..."></textarea>
+        </label>
+      </section>
+
+      <section class="card income page" data-page="cashflow">
+        <h2>現役の収入パラメーター</h2>
+        <p class="helper-text">マネーフォワードの12か月平均（円）を入力します。</p>
+        <div class="income-grid">
+          <label>
+            給与
+            <input class="income-input" data-income-key="salary" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            月給以外
+            <input class="income-input" data-income-key="bonus" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            配当所得
+            <input class="income-input" data-income-key="dividend" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            その他入金
+            <input class="income-input" data-income-key="other" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            不動産所得
+            <input class="income-input" data-income-key="realestate" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+        </div>
+        <div class="income-summary">
+          <span>月の平均収入</span>
+          <strong id="monthlyIncome">-</strong>
+        </div>
+      </section>
+
+      <section class="card expenses page" data-page="cashflow">
+        <h2>現役の支出パラメーター</h2>
+        <p class="helper-text">マネーフォワードの12か月平均（円）を入力します。</p>
+        <div class="expense-grid">
+          <label>
+            住宅
+            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            自動車
+            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            現金・カード
+            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            通信費
+            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            水道光熱費
+            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            食費
+            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            趣味・娯楽
+            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            保険
+            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            特別な支出
+            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            日用品
+            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            健康・医療
+            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            交際費
+            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            交通費
+            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            その他
+            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            衣服・美容
+            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            税・社会保障
+            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+        </div>
+        <div class="expense-summary">
+          <span>月の平均支出</span>
+          <strong id="monthlyExpense">-</strong>
+        </div>
+      </section>
+
+      <section class="card income page" data-page="retire-cashflow">
+        <h2>定年後の収入</h2>
+        <label>
+          定年年齢
+          <input id="retirementAge" type="number" min="0" max="120" step="1" value="60" required>
+        </label>
+        <p class="helper-text">定年後の12か月平均（円）を入力します。</p>
+        <div class="income-grid">
+          <label>
+            給与
+            <input class="retire-income-input" data-income-key="salary" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            月給以外
+            <input class="retire-income-input" data-income-key="bonus" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            不動産所得
+            <input class="retire-income-input" data-income-key="realestate" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+        </div>
+        <div class="income-summary">
+          <span>定年後の月平均収入</span>
+          <strong id="monthlyRetireIncome">-</strong>
+        </div>
+        <label>
+          定年後の収入がある年齢（給与・月給以外・不動産所得）
+          <input id="retirementIncomeEndAge" type="number" min="0" max="120" step="1" value="75" required>
+        </label>
+        <div class="income-subsection">
+          <h3>年金生活時の収入</h3>
+          <label>
+            年金収入
+            <input class="pension-income-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <div class="income-summary">
+            <span>年金生活時の月平均収入</span>
+            <strong id="monthlyPensionIncome">-</strong>
+          </div>
+        </div>
+        <p class="helper-text">配当所得・その他入金は現役の値を引き継ぎます。</p>
+      </section>
+
+      <section class="card expenses page" data-page="retire-cashflow">
+        <h2>定年後の支出</h2>
+        <p class="helper-text">定年後の12か月平均（円）を入力します。</p>
+        <div class="expense-grid">
+          <label>
+            住宅
+            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            自動車
+            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            現金・カード
+            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            通信費
+            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            水道光熱費
+            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            食費
+            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            趣味・娯楽
+            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            保険
+            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            特別な支出
+            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            日用品
+            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            健康・医療
+            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            交際費
+            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            交通費
+            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            その他
+            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            衣服・美容
+            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+          <label>
+            税・社会保障
+            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+          </label>
+        </div>
+        <div class="expense-summary">
+          <span>定年後の月平均支出</span>
+          <strong id="monthlyRetireExpense">-</strong>
+        </div>
+      </section>
+
+      <section class="card investment page" data-page="investment">
+        <h2>投資パラメーター</h2>
+        <p class="helper-text">残高は資産一覧の貼り付けデータから集計されます。</p>
+        <p class="alert-text" id="investmentAlert" hidden>投資合計が現金を超えています。積立額または投資残高を見直してください。</p>
+        <div class="investment-summary">
+          <div>
+            <span>投資合計（現在）</span>
+            <strong id="investmentTotal">-</strong>
+          </div>
+          <div>
+            <span>現金残高（推計）</span>
+            <strong id="cashBalance">-</strong>
+          </div>
+          <div>
+            <span>積立合計（月額）</span>
+            <strong id="investmentContribTotal">-</strong>
+          </div>
+          <div>
+            <span>投資合計（積立後）</span>
+            <strong id="investmentAfter">-</strong>
+          </div>
+          <div>
+            <span>現金残高（積立後）</span>
+            <strong id="cashAfter">-</strong>
+          </div>
+        </div>
+        <div class="investment-grid">
+          <div class="investment-item">
+            <h3>株式投資</h3>
+            <label>
+              残高（円）
+              <input id="balanceStocks" type="number" min="0" step="1000" inputmode="numeric">
+            </label>
+            <label>
+              積立（月額）
+              <input id="contribStocks" type="number" min="0" step="1000" inputmode="numeric">
+            </label>
+            <label>
+              積立終了年齢
+              <input id="endAgeStocks" type="number" min="0" max="120" step="1" value="65" required>
+            </label>
+          </div>
+          <div class="investment-item">
+            <h3>投資信託</h3>
+            <label>
+              残高（円）
+              <input id="balanceFunds" type="number" min="0" step="1000" inputmode="numeric">
+            </label>
+            <label>
+              積立（月額）
+              <input id="contribFunds" type="number" min="0" step="1000" inputmode="numeric">
+            </label>
+            <label>
+              積立終了年齢
+              <input id="endAgeFunds" type="number" min="0" max="120" step="1" value="65" required>
+            </label>
+          </div>
+          <div class="investment-item">
+            <h3>債券</h3>
+            <label>
+              残高（円）
+              <input id="balanceBonds" type="number" min="0" step="1000" inputmode="numeric">
+            </label>
+            <label>
+              積立（月額）
+              <input id="contribBonds" type="number" min="0" step="1000" inputmode="numeric">
+            </label>
+            <label>
+              積立終了年齢
+              <input id="endAgeBonds" type="number" min="0" max="120" step="1" value="65" required>
+            </label>
+          </div>
+          <div class="investment-item">
+            <h3>保険</h3>
+            <label>
+              残高（円）
+              <input id="balanceInsurance" type="number" min="0" step="1000" inputmode="numeric">
+            </label>
+            <label>
+              積立（月額）
+              <input id="contribInsurance" type="number" min="0" step="1000" inputmode="numeric">
+            </label>
+            <label>
+              積立終了年齢
+              <input id="endAgeInsurance" type="number" min="0" max="120" step="1" value="65" required>
+            </label>
+          </div>
+          <div class="investment-item">
+            <h3>ドル</h3>
+            <label>
+              残高（円換算）
+              <input id="balanceUsd" type="number" min="0" step="1000" inputmode="numeric">
+            </label>
+            <label>
+              積立（月額）
+              <input id="contribUsd" type="number" min="0" step="1000" inputmode="numeric">
+            </label>
+            <label>
+              積立終了年齢
+              <input id="endAgeUsd" type="number" min="0" max="120" step="1" value="65" required>
+            </label>
+          </div>
+          <div class="investment-item">
+            <h3>確定拠出年金</h3>
+            <label>
+              残高（円）
+              <input id="balanceDc" type="number" min="0" step="1000" inputmode="numeric">
+            </label>
+            <label>
+              積立（月額）
+              <input id="contribDc" type="number" min="0" step="1000" inputmode="numeric">
+            </label>
+            <label>
+              積立終了年齢
+              <input id="endAgeDc" type="number" min="0" max="120" step="1" value="65" required>
+            </label>
+          </div>
+          <div class="investment-item">
+            <h3>ニッセイみらいのカタチ</h3>
+            <label>
+              残高（円）
+              <input id="balanceNissay" type="number" min="0" step="1000" inputmode="numeric">
+            </label>
+            <label>
+              積立（月額）
+              <input id="contribNissay" type="number" min="0" step="1000" inputmode="numeric">
+            </label>
+            <label>
+              積立終了年齢
+              <input id="endAgeNissay" type="number" min="0" max="120" step="1" value="65" required>
+            </label>
+          </div>
+        </div>
+        <p class="helper-text">積立は「現金から差し引き、同額を投資残高に加算する」前提で表示します。</p>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
