@@ -1,28 +1,27 @@
 # LifeWealth 100 Simulator
 
-LifeWealth 100 Simulator is a simple web app to estimate the asset balance at age 100
-based on current assets, expected return, and monthly cash flow.
+LifeWealth 100 Simulator は、現在の資産・想定利回り・月次収支にもとづいて
+100歳時点の資産残高を試算するシンプルなWebアプリです。
 
-## Features
-- Monthly simulation from today to age 100
-- Imports asset totals from pasted table data
-- Separate parameters for working years and retirement
-- Investment contribution inputs and end ages
-- Annual CSV export (same columns as asset trend data)
+## 主な機能
+- 今日から100歳までの月次シミュレーション
+- 貼り付けた表データから資産残高を自動取り込み
+- 現役/定年後のパラメーターを分けて入力
+- 投資の積立額と終了年齢を設定
+- 年次CSV出力（資産推移の列と同じ形式）
 
-## How to use
-1. Open `index.html` in your browser.
-2. Set your birth date, current assets, and expected annual return.
-3. Paste asset trend data (optional) and click **貼り付けデータで資産更新**.
-4. Enter income/expense parameters for working and retirement periods.
-5. Check the asset balance at age 100 and export the annual CSV if needed.
+## 使い方
+1. `index.html` をブラウザで開きます。
+2. 誕生日・現在資産・想定利回りを入力します。
+3. 必要なら資産推移データを貼り付け、**貼り付けデータで資産更新**を押します。
+4. 現役/定年後の収入・支出を入力します。
+5. 100歳時点の資産残高を確認し、必要に応じて年次CSVを出力します。
 
-## Input formats
-- Asset list and asset trend data are expected as pasted table text.
-- The first row should contain headers.
-- Tabs or commas are supported as delimiters.
+## 入力データの形式
+- 資産一覧・資産推移は「貼り付けた表データ」を想定しています。
+- 1行目にヘッダーがある形式で入力してください。
+- 区切りはタブ/カンマどちらでも対応します。
 
-## Notes
-- Contributions move cash into investments; they do not increase total assets by themselves.
-- Warnings appear if cash balance becomes negative.
-
+## 補足
+- 投資の積立は「現金から移動するだけ」で、総資産を増やしません。
+- 現金残高がマイナスになる場合は警告が表示されます。
