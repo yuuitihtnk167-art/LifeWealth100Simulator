@@ -18,6 +18,7 @@
         <button class="tab-button" type="button" data-page="cashflow">現役の支出・収入</button>
         <button class="tab-button" type="button" data-page="retire-cashflow">定年後の支出・収入</button>
         <button class="tab-button" type="button" data-page="investment">投資</button>
+        <button class="tab-button" type="button" data-page="bond-input">債券入力</button>
       </nav>
     </header>
 
@@ -32,12 +33,20 @@
           現在の資産総額（円）
           <input id="currentAssets" type="number" min="0" step="10000" value="15000000" required>
         </label>
-        <label>
-          想定運用利回り（年率 %）
-          <input id="annualRate" type="number" min="-100" max="100" step="0.1" value="3" required>
-        </label>
         <button id="applyImport" type="button">貼り付けデータで資産更新</button>
         <button id="exportCsv" type="button">年次CSVをダウンロード</button>
+        <div class="export-panel">
+          <label>
+            年度
+            <select id="statementYear"></select>
+          </label>
+          <div class="export-actions">
+            <button id="exportBalanceSheet" type="button">年次貸借対照表CSV</button>
+            <button id="exportProfitLoss" type="button">年次損益計算書CSV</button>
+            <button id="exportBalanceSheetDecade" type="button">10年単位貸借対照表CSV</button>
+            <button id="exportProfitLossDecade" type="button">10年単位損益計算書CSV</button>
+          </div>
+        </div>
         <p class="import-status" id="importStatus">未取り込み</p>
       </section>
 
@@ -79,10 +88,6 @@
             その他入金
             <input class="income-input" data-income-key="other" type="number" min="0" step="1000" inputmode="numeric">
           </label>
-          <label>
-            不動産所得
-            <input class="income-input" data-income-key="realestate" type="number" min="0" step="1000" inputmode="numeric">
-          </label>
         </div>
         <div class="income-summary">
           <span>月の平均収入</span>
@@ -96,67 +101,67 @@
         <div class="expense-grid">
           <label>
             住宅
-            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="expense-input" data-expense-key="housing" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             自動車
-            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="expense-input" data-expense-key="car" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             現金・カード
-            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="expense-input" data-expense-key="cashcard" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             通信費
-            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="expense-input" data-expense-key="telecom" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             水道光熱費
-            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="expense-input" data-expense-key="utilities" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             食費
-            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="expense-input" data-expense-key="food" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             趣味・娯楽
-            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="expense-input" data-expense-key="hobby" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             保険
-            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="expense-input" data-expense-key="insurance" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             特別な支出
-            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="expense-input" data-expense-key="special" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             日用品
-            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="expense-input" data-expense-key="daily" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             健康・医療
-            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="expense-input" data-expense-key="medical" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             交際費
-            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="expense-input" data-expense-key="social" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             交通費
-            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="expense-input" data-expense-key="transport" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             その他
-            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="expense-input" data-expense-key="other" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             衣服・美容
-            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="expense-input" data-expense-key="fashion" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             税・社会保障
-            <input class="expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="expense-input" data-expense-key="tax" type="number" min="0" step="1000" inputmode="numeric">
           </label>
         </div>
         <div class="expense-summary">
@@ -180,10 +185,6 @@
           <label>
             月給以外
             <input class="retire-income-input" data-income-key="bonus" type="number" min="0" step="1000" inputmode="numeric">
-          </label>
-          <label>
-            不動産所得
-            <input class="retire-income-input" data-income-key="realestate" type="number" min="0" step="1000" inputmode="numeric">
           </label>
         </div>
         <div class="income-summary">
@@ -214,67 +215,67 @@
         <div class="expense-grid">
           <label>
             住宅
-            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="retire-expense-input" data-expense-key="housing" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             自動車
-            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="retire-expense-input" data-expense-key="car" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             現金・カード
-            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="retire-expense-input" data-expense-key="cashcard" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             通信費
-            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="retire-expense-input" data-expense-key="telecom" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             水道光熱費
-            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="retire-expense-input" data-expense-key="utilities" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             食費
-            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="retire-expense-input" data-expense-key="food" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             趣味・娯楽
-            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="retire-expense-input" data-expense-key="hobby" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             保険
-            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="retire-expense-input" data-expense-key="insurance" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             特別な支出
-            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="retire-expense-input" data-expense-key="special" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             日用品
-            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="retire-expense-input" data-expense-key="daily" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             健康・医療
-            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="retire-expense-input" data-expense-key="medical" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             交際費
-            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="retire-expense-input" data-expense-key="social" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             交通費
-            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="retire-expense-input" data-expense-key="transport" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             その他
-            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="retire-expense-input" data-expense-key="other" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             衣服・美容
-            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="retire-expense-input" data-expense-key="fashion" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <label>
             税・社会保障
-            <input class="retire-expense-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input class="retire-expense-input" data-expense-key="tax" type="number" min="0" step="1000" inputmode="numeric">
           </label>
         </div>
         <div class="expense-summary">
@@ -321,6 +322,10 @@
               <input id="contribStocks" type="number" min="0" step="1000" inputmode="numeric">
             </label>
             <label>
+              想定利回り（年率 %）
+              <input id="rateStocks" type="number" min="-100" max="100" step="0.1" inputmode="numeric">
+            </label>
+            <label>
               積立終了年齢
               <input id="endAgeStocks" type="number" min="0" max="120" step="1" value="65" required>
             </label>
@@ -334,6 +339,10 @@
             <label>
               積立（月額）
               <input id="contribFunds" type="number" min="0" step="1000" inputmode="numeric">
+            </label>
+            <label>
+              想定利回り（年率 %）
+              <input id="rateFunds" type="number" min="-100" max="100" step="0.1" inputmode="numeric">
             </label>
             <label>
               積立終了年齢
@@ -351,6 +360,10 @@
               <input id="contribBonds" type="number" min="0" step="1000" inputmode="numeric">
             </label>
             <label>
+              想定利回り（年率 %）
+              <input id="rateBonds" type="number" min="-100" max="100" step="0.1" inputmode="numeric">
+            </label>
+            <label>
               積立終了年齢
               <input id="endAgeBonds" type="number" min="0" max="120" step="1" value="65" required>
             </label>
@@ -364,6 +377,10 @@
             <label>
               積立（月額）
               <input id="contribInsurance" type="number" min="0" step="1000" inputmode="numeric">
+            </label>
+            <label>
+              想定利回り（年率 %）
+              <input id="rateInsurance" type="number" min="-100" max="100" step="0.1" inputmode="numeric">
             </label>
             <label>
               積立終了年齢
@@ -418,7 +435,35 @@
         </div>
         <p class="helper-text">積立は「現金から差し引き、同額を投資残高に加算する」前提で表示します。</p>
       </section>
+
+      <section class="card page" data-page="bond-input">
+        <h2 class="bond-heading">
+          債券の入力
+          <span class="bond-average" id="bondAverageRate">平均利率: -</span>
+        </h2>
+        <p class="helper-text">購入ごとに追加できる一覧形式です（計算には反映されません）。</p>
+        <div class="bond-table">
+          <table>
+            <thead>
+              <tr>
+                <th>銘柄名</th>
+                <th>通貨</th>
+                <th>保有額面</th>
+                <th>所得単価</th>
+                <th>償還日</th>
+                <th>利率（%）</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="bondTableBody"></tbody>
+          </table>
+        </div>
+        <button id="addBondRow" type="button">債券を追加</button>
+      </section>
     </main>
+    <footer class="update-footer">
+      <span id="lastUpdated">更新日時: -</span>
+    </footer>
   </div>
 
   <script src="app.js"></script>

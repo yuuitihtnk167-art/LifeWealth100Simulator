@@ -1,11 +1,22 @@
 ﻿const birthDateInput = document.getElementById("birthDate");
 const currentAssetsInput = document.getElementById("currentAssets");
-const annualRateInput = document.getElementById("annualRate");
 const retirementAgeInput = document.getElementById("retirementAge");
 const assetDataInput = document.getElementById("assetData");
 const summaryDataInput = document.getElementById("summaryData");
 const importButton = document.getElementById("applyImport");
 const exportButton = document.getElementById("exportCsv");
+const statementYearSelect = document.getElementById("statementYear");
+const exportBalanceSheetButton = document.getElementById("exportBalanceSheet");
+const exportProfitLossButton = document.getElementById("exportProfitLoss");
+const exportBalanceSheetDecadeButton = document.getElementById(
+  "exportBalanceSheetDecade"
+);
+const exportProfitLossDecadeButton = document.getElementById(
+  "exportProfitLossDecade"
+);
+const bondTableBody = document.getElementById("bondTableBody");
+const addBondRowButton = document.getElementById("addBondRow");
+const bondAverageRate = document.getElementById("bondAverageRate");
 const importStatus = document.getElementById("importStatus");
 const expenseInputs = Array.from(document.querySelectorAll(".expense-input"));
 const monthlyExpense = document.getElementById("monthlyExpense");
@@ -33,6 +44,10 @@ const balanceInsuranceInput = document.getElementById("balanceInsurance");
 const balanceUsdInput = document.getElementById("balanceUsd");
 const balanceDcInput = document.getElementById("balanceDc");
 const balanceNissayInput = document.getElementById("balanceNissay");
+const rateStocksInput = document.getElementById("rateStocks");
+const rateFundsInput = document.getElementById("rateFunds");
+const rateBondsInput = document.getElementById("rateBonds");
+const rateInsuranceInput = document.getElementById("rateInsurance");
 const contribStocksInput = document.getElementById("contribStocks");
 const contribFundsInput = document.getElementById("contribFunds");
 const contribBondsInput = document.getElementById("contribBonds");
@@ -57,9 +72,11 @@ const tabButtons = Array.from(document.querySelectorAll(".tab-button"));
 const pages = Array.from(document.querySelectorAll(".page"));
 const resultValue = document.getElementById("resultValue");
 const resultMeta = document.getElementById("resultMeta");
+const lastUpdated = document.getElementById("lastUpdated");
 let importDirty = false;
 
 const STORAGE_KEY = "lifewealth100.inputs.v1";
+const BOND_STORAGE_KEY = "lifewealth100.bonds.v1";
 const persistInputs = Array.from(document.querySelectorAll("input, textarea")).filter(
   (el) => el.type !== "button" && el.type !== "submit"
 );
@@ -134,10 +151,58 @@ function simulateToAge100({
     if (monthIndex >= retirementIncomeEndAge) {
       cashFlow = postRetirementMonthlyNetCash;
     }
-    assets = (startAssets + cashFlow) * (1 + monthlyRate);
+    const investmentIncome = startAssets * monthlyRate;
+    assets = startAssets + cashFlow + investmentIncome;
   }
 
   return { months, assets };
+}
+
+function simulateToAge100Detailed({
+  startDate,
+  monthsRemaining,
+  retirementAge,
+  retirementIncomeEndAge,
+  monthlyNetCash,
+  retirementMonthlyNetCash,
+  postRetirementMonthlyNetCash,
+  contributionSchedule,
+  categories,
+  categoryRates,
+}) {
+  const months = Math.max(0, monthsRemaining);
+  let data = { ...categories };
+  const startMonthIndex = monthIndex(startDate);
+  const investKeys = ["stocks", "funds", "bonds", "insurance", "pension", "other"];
+
+  for (let i = 0; i < months; i += 1) {
+    const monthIndexValue = startMonthIndex + i;
+    let cashFlow = monthlyNetCash;
+    if (monthIndexValue >= retirementAge) {
+      cashFlow = retirementMonthlyNetCash;
+    }
+    if (monthIndexValue >= retirementIncomeEndAge) {
+      cashFlow = postRetirementMonthlyNetCash;
+    }
+
+    investKeys.forEach((key) => {
+      const rate = categoryRates[key] ?? 0;
+      data[key] += data[key] * rate;
+    });
+
+    data.cash += cashFlow;
+
+    contributionSchedule.forEach((item) => {
+      if (monthIndexValue < item.endMonthIndex) {
+        if (item.category !== "cash") {
+          data.cash -= item.amount;
+        }
+        data[item.category] += item.amount;
+      }
+    });
+  }
+
+  return { months, assets: sumCategoryTotal(data) };
 }
 
 function getContributionForMonth(monthIndexValue, schedule) {
@@ -187,6 +252,7 @@ function simulateAnnualSeries({
   startDate,
   monthsRemaining,
   annualRate,
+  categoryRates,
   retirementAge,
   retirementIncomeEndAge,
   monthlyNetCash,
@@ -200,6 +266,7 @@ function simulateAnnualSeries({
   const totalMonths = Math.max(0, monthsRemaining);
   let data = { ...categories };
   const startMonthIndex = monthIndex(startDate);
+  const investKeys = ["stocks", "funds", "bonds", "insurance", "pension", "other"];
 
   for (let i = 0; i < totalMonths; i += 1) {
     const monthIndexValue = startMonthIndex + i;
@@ -211,6 +278,11 @@ function simulateAnnualSeries({
       cashFlow = postRetirementMonthlyNetCash;
     }
 
+    investKeys.forEach((key) => {
+      const rate = categoryRates?.[key] ?? monthlyRate;
+      data[key] += data[key] * rate;
+    });
+
     data.cash += cashFlow;
 
     contributionSchedule.forEach((item) => {
@@ -221,12 +293,6 @@ function simulateAnnualSeries({
         data[item.category] += item.amount;
       }
     });
-
-    ["stocks", "funds", "bonds", "insurance", "pension", "other"].forEach(
-      (key) => {
-        data[key] = data[key] * (1 + monthlyRate);
-      }
-    );
 
     const isYearEnd = (i + 1) % 12 === 0;
     const isFinal = i === totalMonths - 1;
@@ -246,6 +312,195 @@ function simulateAnnualSeries({
         total,
         ...data,
       });
+    }
+  }
+
+  return rows;
+}
+
+function sumCategoryTotal(data) {
+  return (
+    data.cash +
+    data.stocks +
+    data.funds +
+    data.bonds +
+    data.insurance +
+    data.pension +
+    data.points +
+    data.other
+  );
+}
+
+function simulateAnnualStatements({
+  startDate,
+  monthsRemaining,
+  annualRate,
+  categoryRates,
+  retirementAge,
+  retirementIncomeEndAge,
+  workIncome,
+  workExpense,
+  retireIncome,
+  retireExpense,
+  pensionIncome,
+  pensionExpense,
+  contributionSchedule,
+  categories,
+}) {
+  const monthlyRate = Math.pow(1 + annualRate, 1 / 12) - 1;
+  const rows = [];
+  const totalMonths = Math.max(0, monthsRemaining);
+  let data = { ...categories };
+  const startMonthIndex = monthIndex(startDate);
+  const investKeys = ["stocks", "funds", "bonds", "insurance", "pension", "other"];
+
+  let yearStart = { ...data };
+  let yearIncome = 0;
+  let yearCashIncome = 0;
+  let yearInvestmentIncome = 0;
+  let yearExpense = 0;
+  let yearInvestmentGain = 0;
+  let yearContribution = 0;
+  let yearContributionByCategory = {
+    stocks: 0,
+    funds: 0,
+    bonds: 0,
+    insurance: 0,
+    pension: 0,
+    other: 0,
+  };
+  let yearGainByCategory = {
+    stocks: 0,
+    funds: 0,
+    bonds: 0,
+    insurance: 0,
+    pension: 0,
+    other: 0,
+  };
+  let yearWorkMonths = 0;
+  let yearRetireMonths = 0;
+  let yearPensionMonths = 0;
+  let yearMonths = 0;
+
+  for (let i = 0; i < totalMonths; i += 1) {
+    const monthIndexValue = startMonthIndex + i;
+    const monthDate = addMonths(startDate, i);
+
+    let monthlyIncome = workIncome;
+    let monthlyExpense = workExpense;
+    let phase = "work";
+    if (monthIndexValue >= retirementAge) {
+      monthlyIncome = retireIncome;
+      monthlyExpense = retireExpense;
+      phase = "retire";
+    }
+    if (monthIndexValue >= retirementIncomeEndAge) {
+      monthlyIncome = pensionIncome;
+      monthlyExpense = pensionExpense;
+      phase = "pension";
+    }
+
+    let investmentIncome = 0;
+    investKeys.forEach((key) => {
+      const rate = categoryRates?.[key] ?? monthlyRate;
+      const gain = data[key] * rate;
+      data[key] += gain;
+      yearGainByCategory[key] += gain;
+      investmentIncome += gain;
+    });
+    yearInvestmentIncome += investmentIncome;
+
+    data.cash += monthlyIncome - monthlyExpense;
+    yearIncome += monthlyIncome + investmentIncome;
+    yearCashIncome += monthlyIncome;
+    yearExpense += monthlyExpense;
+    if (phase === "work") {
+      yearWorkMonths += 1;
+    } else if (phase === "retire") {
+      yearRetireMonths += 1;
+    } else {
+      yearPensionMonths += 1;
+    }
+
+    contributionSchedule.forEach((item) => {
+      if (monthIndexValue < item.endMonthIndex) {
+        yearContribution += item.amount;
+        if (yearContributionByCategory[item.category] !== undefined) {
+          yearContributionByCategory[item.category] += item.amount;
+        }
+        if (item.category !== "cash") {
+          data.cash -= item.amount;
+        }
+        data[item.category] += item.amount;
+      }
+    });
+
+    yearInvestmentGain += investmentIncome;
+    yearMonths += 1;
+
+    const isYearEnd = monthDate.getMonth() === 11;
+    const isFinal = i === totalMonths - 1;
+    if (isYearEnd || isFinal) {
+      const endDate = addMonths(startDate, i + 1);
+      const startTotal = sumCategoryTotal(yearStart);
+      const endTotal = sumCategoryTotal(data);
+      const netChange = yearIncome - yearExpense;
+      const mismatch =
+        Math.round(startTotal + netChange) !== Math.round(endTotal);
+      rows.push({
+        year: monthDate.getFullYear(),
+        date: endDate,
+        start: { ...yearStart, total: startTotal },
+        end: { ...data, total: endTotal },
+        income: yearIncome,
+        cashIncome: yearCashIncome,
+        investmentIncome: yearInvestmentIncome,
+        expense: yearExpense,
+        netCash: netChange,
+        investmentGain: yearInvestmentGain,
+        totalChange: endTotal - startTotal,
+        months: yearMonths,
+        contributions: yearContribution,
+        contributionsByCategory: { ...yearContributionByCategory },
+        gainsByCategory: { ...yearGainByCategory },
+        workMonths: yearWorkMonths,
+        retireMonths: yearRetireMonths,
+        pensionMonths: yearPensionMonths,
+        workIncome,
+        retireIncome,
+        pensionIncome,
+        workExpense,
+        retireExpense,
+        pensionExpense,
+        mismatch,
+      });
+      yearStart = { ...data };
+      yearIncome = 0;
+      yearCashIncome = 0;
+      yearInvestmentIncome = 0;
+      yearExpense = 0;
+      yearInvestmentGain = 0;
+      yearContribution = 0;
+      yearContributionByCategory = {
+        stocks: 0,
+        funds: 0,
+        bonds: 0,
+        insurance: 0,
+        pension: 0,
+        other: 0,
+      };
+      yearGainByCategory = {
+        stocks: 0,
+        funds: 0,
+        bonds: 0,
+        insurance: 0,
+        pension: 0,
+        other: 0,
+      };
+      yearWorkMonths = 0;
+      yearRetireMonths = 0;
+      yearPensionMonths = 0;
+      yearMonths = 0;
     }
   }
 
@@ -400,16 +655,77 @@ function formatDate(date) {
   return `${year}-${month}-${day}`;
 }
 
+function formatAgeYears(birthDate, atDate) {
+  if (!birthDate || !atDate) {
+    return "-";
+  }
+  const months = fullMonthsBetween(birthDate, atDate);
+  return Math.floor(months / 12);
+}
+
+function getPeriodStartDate(periodEndDate, months) {
+  if (!periodEndDate || !Number.isFinite(months)) {
+    return null;
+  }
+  return addMonths(periodEndDate, -months);
+}
+
+function formatDateTime(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
 function toCsvNumber(value) {
   return Math.round(value);
 }
 
-function downloadCsv(rows) {
+function escapeCsvCell(value) {
+  const text = String(value).replace(/"/g, '""');
+  return `"${text}"`;
+}
+
+function buildSignedExpression(terms) {
+  if (!terms.length) {
+    return "0";
+  }
+  const [first, ...rest] = terms.map((value) => toCsvNumber(value));
+  let expression = `${first}`;
+  rest.forEach((value) => {
+    if (value < 0) {
+      expression += `-${Math.abs(value)}`;
+      return;
+    }
+    expression += `+${value}`;
+  });
+  return expression;
+}
+
+function buildMultiplicationExpression(items) {
+  const parts = items
+    .filter((item) => item.months > 0 && item.amount !== 0)
+    .map((item) => `${toCsvNumber(item.amount)}*${item.months}`);
+  if (parts.length === 0) {
+    return "0";
+  }
+  return parts.join("+");
+}
+
+function csvCellWithFormula(value, expression) {
+  return escapeCsvCell(`${toCsvNumber(value)}\n=${expression}`);
+}
+
+function downloadCsv(rows, birthDate) {
   const header =
-    "日付,合計（円）,預金・現金・暗号資産（円）,株式(現物)（円）,投資信託（円）,債券（円）,保険（円）,年金（円）,ポイント（円）,その他の資産（円）";
+    "日付,年齢,合計（円）,預金・現金・暗号資産（円）,株式(現物)（円）,投資信託（円）,債券（円）,保険（円）,年金（円）,ポイント（円）,その他の資産（円）";
   const lines = rows.map((row) =>
     [
       formatDate(row.date),
+      formatAgeYears(birthDate, row.date),
       toCsvNumber(row.total),
       toCsvNumber(row.cash),
       toCsvNumber(row.stocks),
@@ -427,6 +743,18 @@ function downloadCsv(rows) {
   const link = document.createElement("a");
   link.href = url;
   link.download = "LifeWealth100_annual.csv";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function downloadCsvText(csv, filename) {
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -679,6 +1007,10 @@ function getPersistKey(el, index) {
   if (incomeKey) {
     return `${el.className}:${incomeKey}`;
   }
+  const expenseKey = el.dataset.expenseKey;
+  if (expenseKey) {
+    return `${el.className}:${expenseKey}`;
+  }
   return `${el.className || el.tagName}:${index}`;
 }
 
@@ -696,11 +1028,184 @@ function loadPersistedInputs() {
       const key = getPersistKey(el, index);
       if (Object.prototype.hasOwnProperty.call(data, key)) {
         el.value = data[key];
+        return;
+      }
+      const legacyKey = `${el.className || el.tagName}:${index}`;
+      if (Object.prototype.hasOwnProperty.call(data, legacyKey)) {
+        el.value = data[legacyKey];
       }
     });
   } catch {
     // Ignore storage failures.
   }
+}
+
+function createBondRow(data = {}) {
+  if (!bondTableBody) {
+    return;
+  }
+  const row = document.createElement("tr");
+
+  const nameInput = document.createElement("input");
+  nameInput.type = "text";
+  nameInput.value = data.name ?? "";
+  nameInput.dataset.key = "name";
+  nameInput.classList.add("bond-name");
+  nameInput.title = nameInput.value;
+
+  const currencySelect = document.createElement("select");
+  currencySelect.dataset.key = "currency";
+  ["JPY", "USD"].forEach((code) => {
+    const option = document.createElement("option");
+    option.value = code;
+    option.textContent = code;
+    currencySelect.appendChild(option);
+  });
+  currencySelect.value = data.currency ?? "JPY";
+
+  const faceValueInput = document.createElement("input");
+  faceValueInput.type = "number";
+  faceValueInput.min = "0";
+  faceValueInput.step = "1000";
+  faceValueInput.inputMode = "numeric";
+  faceValueInput.value = data.faceValue ?? "";
+  faceValueInput.dataset.key = "faceValue";
+
+  const purchasePriceInput = document.createElement("input");
+  purchasePriceInput.type = "number";
+  purchasePriceInput.min = "0";
+  purchasePriceInput.step = "1";
+  purchasePriceInput.inputMode = "numeric";
+  purchasePriceInput.value = data.purchasePrice ?? "";
+  purchasePriceInput.dataset.key = "purchasePrice";
+
+  const maturityDateInput = document.createElement("input");
+  maturityDateInput.type = "date";
+  maturityDateInput.value = data.maturityDate ?? "";
+  maturityDateInput.dataset.key = "maturityDate";
+
+  const rateInput = document.createElement("input");
+  rateInput.type = "number";
+  rateInput.min = "-100";
+  rateInput.max = "100";
+  rateInput.step = "0.01";
+  rateInput.inputMode = "numeric";
+  rateInput.value = data.rate ?? "";
+  rateInput.dataset.key = "rate";
+
+  const removeButton = document.createElement("button");
+  removeButton.type = "button";
+  removeButton.textContent = "削除";
+  removeButton.addEventListener("click", () => {
+    row.remove();
+    persistBondRows();
+  });
+
+  const cells = [
+    nameInput,
+    currencySelect,
+    faceValueInput,
+    purchasePriceInput,
+    maturityDateInput,
+    rateInput,
+  ].map((input) => {
+    const td = document.createElement("td");
+    td.appendChild(input);
+    return td;
+  });
+
+  const actionCell = document.createElement("td");
+  actionCell.className = "bond-action";
+  actionCell.appendChild(removeButton);
+  cells.push(actionCell);
+
+  cells.forEach((cell) => row.appendChild(cell));
+  bondTableBody.appendChild(row);
+
+  [
+    nameInput,
+    currencySelect,
+    faceValueInput,
+    purchasePriceInput,
+    maturityDateInput,
+    rateInput,
+  ].forEach((input) => {
+    input.addEventListener("input", () => {
+      if (input === nameInput) {
+        nameInput.title = nameInput.value;
+      }
+      persistBondRows();
+    });
+    if (input.tagName === "SELECT") {
+      input.addEventListener("change", persistBondRows);
+    }
+  });
+  nameInput.addEventListener("focus", () => {
+    nameInput.title = nameInput.value;
+  });
+}
+
+function persistBondRows() {
+  if (!bondTableBody) {
+    return;
+  }
+  const rows = Array.from(bondTableBody.querySelectorAll("tr")).map((row) => {
+    const data = {};
+    row.querySelectorAll("input, select").forEach((input) => {
+      data[input.dataset.key] = input.value;
+    });
+    return data;
+  });
+  try {
+    localStorage.setItem(BOND_STORAGE_KEY, JSON.stringify(rows));
+  } catch {
+    // Ignore storage failures.
+  }
+  updateBondAverageRate();
+}
+
+function loadBondRows() {
+  if (!bondTableBody) {
+    return;
+  }
+  bondTableBody.innerHTML = "";
+  try {
+    const raw = localStorage.getItem(BOND_STORAGE_KEY);
+    if (!raw) {
+      createBondRow();
+      updateBondAverageRate();
+      return;
+    }
+    const rows = JSON.parse(raw);
+    if (!Array.isArray(rows) || rows.length === 0) {
+      createBondRow();
+      updateBondAverageRate();
+      return;
+    }
+    rows.forEach((row) => createBondRow(row));
+    updateBondAverageRate();
+  } catch {
+    createBondRow();
+    updateBondAverageRate();
+  }
+}
+
+function updateBondAverageRate() {
+  if (!bondTableBody || !bondAverageRate) {
+    return;
+  }
+  const rateInputs = Array.from(bondTableBody.querySelectorAll("input")).filter(
+    (input) => input.dataset.key === "rate"
+  );
+  const values = rateInputs
+    .map((input) => parseNumber(input.value))
+    .filter((value) => value !== null);
+  if (!values.length) {
+    bondAverageRate.textContent = "平均利率: -";
+    return;
+  }
+  const avg = values.reduce((sum, value) => sum + value, 0) / values.length;
+  bondAverageRate.textContent = `平均利率: ${percentFormatter.format(avg)}%`;
 }
 
 function persistInputsToStorage() {
@@ -933,9 +1438,41 @@ function markImportDirty() {
 }
 
 function handleExportCsv() {
+  const context = getSimulationContext();
+  if (!context) {
+    window.alert("入力値を確認してください。");
+    return;
+  }
+
+  const rows = simulateAnnualSeries({
+    startDate: context.today,
+    monthsRemaining: context.monthsRemaining,
+    annualRate: context.annualRate,
+    categoryRates: context.categoryRates,
+    retirementAge: context.retirementMonthIndex,
+    retirementIncomeEndAge: context.retirementIncomeEndMonthIndex,
+    monthlyNetCash: context.incomeTotal - context.expenseTotal,
+    retirementMonthlyNetCash:
+      context.retireBaseIncome + context.ongoingIncome - context.retireExpenseTotal,
+    postRetirementMonthlyNetCash:
+      context.pensionIncomeTotal +
+      context.ongoingIncome -
+      context.retireExpenseTotal,
+    contributionSchedule: buildContributionSchedule(context.birthDate),
+    categories: context.categories,
+  });
+
+  if (!rows.length) {
+    window.alert("出力できるデータがありません。");
+    return;
+  }
+
+  downloadCsv(rows, context.birthDate);
+}
+
+function getSimulationContext() {
   const birthDate = parseDate(birthDateInput.value);
   const currentAssets = parseNumber(currentAssetsInput.value);
-  const annualRatePercent = parseNumber(annualRateInput.value);
   const retirementAgeYears = parseNumber(retirementAgeInput.value);
   const retirementIncomeEndAgeYears =
     parseNumber(retirementIncomeEndAgeInput.value) ?? 100;
@@ -943,23 +1480,40 @@ function handleExportCsv() {
   if (
     birthDate === null ||
     currentAssets === null ||
-    annualRatePercent === null ||
     retirementAgeYears === null ||
     retirementIncomeEndAgeYears === null
   ) {
-    window.alert("入力値を確認してください。");
-    return;
+    return null;
   }
 
   const today = new Date();
   const hundredthBirthday = addYears(birthDate, 100);
   const monthsRemaining = fullMonthsBetween(today, hundredthBirthday);
   if (monthsRemaining <= 0) {
-    window.alert("100歳までの期間がありません。");
-    return;
+    return null;
   }
 
-  const annualRate = annualRatePercent / 100;
+  const annualRate = 0;
+  const rateStocks = parseNumber(rateStocksInput?.value);
+  const rateFunds = parseNumber(rateFundsInput?.value);
+  const rateBonds = parseNumber(rateBondsInput?.value);
+  const rateInsurance = parseNumber(rateInsuranceInput?.value);
+  const toMonthlyRate = (rate) => Math.pow(1 + rate, 1 / 12) - 1;
+  const defaultMonthlyRate = toMonthlyRate(annualRate);
+  const categoryRates = {
+    stocks:
+      rateStocks === null ? defaultMonthlyRate : toMonthlyRate(rateStocks / 100),
+    funds:
+      rateFunds === null ? defaultMonthlyRate : toMonthlyRate(rateFunds / 100),
+    bonds:
+      rateBonds === null ? defaultMonthlyRate : toMonthlyRate(rateBonds / 100),
+    insurance:
+      rateInsurance === null
+        ? defaultMonthlyRate
+        : toMonthlyRate(rateInsurance / 100),
+    pension: defaultMonthlyRate,
+    other: defaultMonthlyRate,
+  };
   const expenseTotal = sumInputs(expenseInputs);
   const incomeTotal = sumInputs(incomeInputs);
   const retireExpenseTotal = sumInputs(retireExpenseInputs);
@@ -967,17 +1521,9 @@ function handleExportCsv() {
   const retireIncomeMap = mapIncomeInputs(retireIncomeInputs);
   const retireBaseIncome =
     (retireIncomeMap.salary || 0) +
-    (retireIncomeMap.bonus || 0) +
-    (retireIncomeMap.realestate || 0);
+    (retireIncomeMap.bonus || 0);
   const pensionIncomeTotal = sumInputs(pensionIncomeInputs);
   const ongoingIncome = (incomeMap.dividend || 0) + (incomeMap.other || 0);
-
-  const monthlyNetCash = incomeTotal - expenseTotal;
-  const retirementMonthlyNetCash =
-    retireBaseIncome + ongoingIncome - retireExpenseTotal;
-  const postRetirementMonthlyNetCash =
-    pensionIncomeTotal + ongoingIncome - retireExpenseTotal;
-
   const summaryBreakdown = getSummaryBreakdown(summaryDataInput.value);
   const initial = buildInitialCategories(summaryBreakdown, currentAssets);
   const categories = {
@@ -991,31 +1537,396 @@ function handleExportCsv() {
     other: initial.other,
   };
 
-  const rows = simulateAnnualSeries({
-    startDate: today,
-    monthsRemaining,
+  return {
+    birthDate,
+    currentAssets,
     annualRate,
-    retirementAge: monthIndex(addYears(birthDate, retirementAgeYears)),
-    retirementIncomeEndAge: monthIndex(addYears(birthDate, retirementIncomeEndAgeYears)),
-    monthlyNetCash,
-    retirementMonthlyNetCash,
-    postRetirementMonthlyNetCash,
-    contributionSchedule: buildContributionSchedule(birthDate),
+    categoryRates,
+    today,
+    monthsRemaining,
+    retirementAgeYears,
+    retirementIncomeEndAgeYears,
+    retirementMonthIndex: monthIndex(addYears(birthDate, retirementAgeYears)),
+    retirementIncomeEndMonthIndex: monthIndex(
+      addYears(birthDate, retirementIncomeEndAgeYears)
+    ),
+    expenseTotal,
+    incomeTotal,
+    retireExpenseTotal,
+    retireBaseIncome,
+    pensionIncomeTotal,
+    ongoingIncome,
     categories,
+  };
+}
+
+function buildStatementRows({ showAlert }) {
+  const context = getSimulationContext();
+  if (!context) {
+    if (showAlert) {
+      window.alert("入力値を確認してください。");
+    }
+    return null;
+  }
+
+  const rows = simulateAnnualStatements({
+    startDate: context.today,
+    monthsRemaining: context.monthsRemaining,
+    annualRate: context.annualRate,
+    categoryRates: context.categoryRates,
+    retirementAge: context.retirementMonthIndex,
+    retirementIncomeEndAge: context.retirementIncomeEndMonthIndex,
+    workIncome: context.incomeTotal,
+    workExpense: context.expenseTotal,
+    retireIncome: context.retireBaseIncome + context.ongoingIncome,
+    retireExpense: context.retireExpenseTotal,
+    pensionIncome: context.pensionIncomeTotal + context.ongoingIncome,
+    pensionExpense: context.retireExpenseTotal,
+    contributionSchedule: buildContributionSchedule(context.birthDate),
+    categories: context.categories,
   });
 
   if (!rows.length) {
-    window.alert("出力できるデータがありません。");
+    if (showAlert) {
+      window.alert("出力できるデータがありません。");
+    }
+    return null;
+  }
+
+  const mismatchRow = rows.find((row) => row.mismatch);
+  if (mismatchRow) {
+    if (showAlert) {
+      window.alert(
+        `${mismatchRow.year}年の計算が一致しません。入力値を見直してください。`
+      );
+    }
+    return null;
+  }
+
+  return rows;
+}
+
+function updateStatementYearOptions(statementRows) {
+  if (!statementYearSelect) {
+    return;
+  }
+  statementYearSelect.innerHTML = "";
+
+  if (!statementRows || statementRows.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "選択できません";
+    statementYearSelect.appendChild(option);
+    statementYearSelect.disabled = true;
+    if (exportBalanceSheetButton) {
+      exportBalanceSheetButton.disabled = true;
+    }
+    if (exportProfitLossButton) {
+      exportProfitLossButton.disabled = true;
+    }
+    if (exportBalanceSheetDecadeButton) {
+      exportBalanceSheetDecadeButton.disabled = true;
+    }
+    if (exportProfitLossDecadeButton) {
+      exportProfitLossDecadeButton.disabled = true;
+    }
     return;
   }
 
-  downloadCsv(rows);
+  const selectedYear = parseNumber(statementYearSelect.value);
+  statementRows.forEach((row) => {
+    const option = document.createElement("option");
+    option.value = row.year;
+    option.textContent =
+      row.months < 12 ? `${row.year}年（${row.months}か月）` : `${row.year}年`;
+    statementYearSelect.appendChild(option);
+  });
+  const matched = statementRows.find((row) => row.year === selectedYear);
+  const fallbackYear = statementRows[statementRows.length - 1].year;
+  statementYearSelect.value = String(matched ? matched.year : fallbackYear);
+  statementYearSelect.disabled = false;
+  if (exportBalanceSheetButton) {
+    exportBalanceSheetButton.disabled = false;
+  }
+  if (exportProfitLossButton) {
+    exportProfitLossButton.disabled = false;
+  }
+  if (exportBalanceSheetDecadeButton) {
+    exportBalanceSheetDecadeButton.disabled = false;
+  }
+  if (exportProfitLossDecadeButton) {
+    exportProfitLossDecadeButton.disabled = false;
+  }
+}
+
+function buildBalanceSheetCsv(row, birthDate) {
+  const header =
+    "年度,年齢,対象月数,期首合計（円）,期首預金・現金・暗号資産（円）,期首株式(現物)（円）,期首投資信託（円）,期首債券（円）,期首保険（円）,期首年金（円）,期首ポイント（円）,期首その他の資産（円）,期末合計（円）,期末預金・現金・暗号資産（円）,期末株式(現物)（円）,期末投資信託（円）,期末債券（円）,期末保険（円）,期末年金（円）,期末ポイント（円）,期末その他の資産（円）";
+  const line = buildBalanceSheetCsvLine(row, birthDate);
+  return [header, line].join("\n");
+}
+
+function buildBalanceSheetCsvLine(row, birthDate) {
+  const periodStartDate = getPeriodStartDate(row.date, row.months);
+  const startTotalExpression = buildSignedExpression([
+    row.start.cash,
+    row.start.stocks,
+    row.start.funds,
+    row.start.bonds,
+    row.start.insurance,
+    row.start.pension,
+    row.start.points,
+    row.start.other,
+  ]);
+  const cashIncomeExpression = buildMultiplicationExpression([
+    { amount: row.workIncome, months: row.workMonths },
+    { amount: row.retireIncome, months: row.retireMonths },
+    { amount: row.pensionIncome, months: row.pensionMonths },
+  ]);
+  const expenseExpression = buildMultiplicationExpression([
+    { amount: row.workExpense, months: row.workMonths },
+    { amount: row.retireExpense, months: row.retireMonths },
+    { amount: row.pensionExpense, months: row.pensionMonths },
+  ]);
+  const incomeExpression = `${cashIncomeExpression}+${toCsvNumber(
+    row.investmentIncome
+  )}`;
+  const netExpression = `(${incomeExpression})-(${expenseExpression})`;
+  const cashEndExpression = `${toCsvNumber(row.start.cash)}+(${cashIncomeExpression})-(${expenseExpression})-${toCsvNumber(
+    row.contributions
+  )}`;
+  const endTotalExpression = `${toCsvNumber(row.start.total)}+(${netExpression})`;
+  return [
+    row.year,
+    formatAgeYears(birthDate, periodStartDate),
+    row.months,
+    csvCellWithFormula(row.start.total, startTotalExpression),
+    csvCellWithFormula(row.start.cash, `${toCsvNumber(row.start.cash)}`),
+    csvCellWithFormula(row.start.stocks, `${toCsvNumber(row.start.stocks)}`),
+    csvCellWithFormula(row.start.funds, `${toCsvNumber(row.start.funds)}`),
+    csvCellWithFormula(row.start.bonds, `${toCsvNumber(row.start.bonds)}`),
+    csvCellWithFormula(row.start.insurance, `${toCsvNumber(row.start.insurance)}`),
+    csvCellWithFormula(row.start.pension, `${toCsvNumber(row.start.pension)}`),
+    csvCellWithFormula(row.start.points, `${toCsvNumber(row.start.points)}`),
+    csvCellWithFormula(row.start.other, `${toCsvNumber(row.start.other)}`),
+    csvCellWithFormula(row.end.total, endTotalExpression),
+    csvCellWithFormula(row.end.cash, cashEndExpression),
+    csvCellWithFormula(
+      row.end.stocks,
+      buildSignedExpression([
+        row.start.stocks,
+        row.contributionsByCategory.stocks,
+        row.gainsByCategory.stocks,
+      ])
+    ),
+    csvCellWithFormula(
+      row.end.funds,
+      buildSignedExpression([
+        row.start.funds,
+        row.contributionsByCategory.funds,
+        row.gainsByCategory.funds,
+      ])
+    ),
+    csvCellWithFormula(
+      row.end.bonds,
+      buildSignedExpression([
+        row.start.bonds,
+        row.contributionsByCategory.bonds,
+        row.gainsByCategory.bonds,
+      ])
+    ),
+    csvCellWithFormula(
+      row.end.insurance,
+      buildSignedExpression([
+        row.start.insurance,
+        row.contributionsByCategory.insurance,
+        row.gainsByCategory.insurance,
+      ])
+    ),
+    csvCellWithFormula(
+      row.end.pension,
+      buildSignedExpression([
+        row.start.pension,
+        row.contributionsByCategory.pension,
+        row.gainsByCategory.pension,
+      ])
+    ),
+    csvCellWithFormula(
+      row.end.points,
+      buildSignedExpression([row.start.points])
+    ),
+    csvCellWithFormula(
+      row.end.other,
+      buildSignedExpression([
+        row.start.other,
+        row.contributionsByCategory.other,
+        row.gainsByCategory.other,
+      ])
+    ),
+  ].join(",");
+}
+
+function buildProfitLossCsv(row, birthDate) {
+  const header =
+    "年度,年齢,対象月数,収入（円）,支出（円）,収支（円）,運用益（円）,資産増減（円）,期首合計（円）,期末合計（円）";
+  const line = buildProfitLossCsvLine(row, birthDate);
+  return [header, line].join("\n");
+}
+
+function buildProfitLossCsvLine(row, birthDate) {
+  const periodStartDate = getPeriodStartDate(row.date, row.months);
+  const startTotalExpression = buildSignedExpression([
+    row.start.cash,
+    row.start.stocks,
+    row.start.funds,
+    row.start.bonds,
+    row.start.insurance,
+    row.start.pension,
+    row.start.points,
+    row.start.other,
+  ]);
+  const cashIncomeExpression = buildMultiplicationExpression([
+    { amount: row.workIncome, months: row.workMonths },
+    { amount: row.retireIncome, months: row.retireMonths },
+    { amount: row.pensionIncome, months: row.pensionMonths },
+  ]);
+  const expenseExpression = buildMultiplicationExpression([
+    { amount: row.workExpense, months: row.workMonths },
+    { amount: row.retireExpense, months: row.retireMonths },
+    { amount: row.pensionExpense, months: row.pensionMonths },
+  ]);
+  const incomeExpression = `${cashIncomeExpression}+${toCsvNumber(
+    row.investmentIncome
+  )}`;
+  const netExpression = `(${incomeExpression})-(${expenseExpression})`;
+  const investmentGainExpression = buildSignedExpression([
+    row.gainsByCategory.stocks,
+    row.gainsByCategory.funds,
+    row.gainsByCategory.bonds,
+    row.gainsByCategory.insurance,
+    row.gainsByCategory.pension,
+    row.gainsByCategory.other,
+  ]);
+  const endTotalExpression = `${toCsvNumber(row.start.total)}+(${netExpression})`;
+  return [
+    row.year,
+    formatAgeYears(birthDate, periodStartDate),
+    row.months,
+    csvCellWithFormula(row.income, incomeExpression),
+    csvCellWithFormula(row.expense, expenseExpression),
+    csvCellWithFormula(row.netCash, netExpression),
+    csvCellWithFormula(row.investmentGain, investmentGainExpression),
+    csvCellWithFormula(row.totalChange, netExpression),
+    csvCellWithFormula(row.start.total, startTotalExpression),
+    csvCellWithFormula(row.end.total, endTotalExpression),
+  ].join(",");
+}
+
+function getStatementRow(statementRows) {
+  if (!statementRows || statementRows.length === 0) {
+    return null;
+  }
+  const selectedYear = parseNumber(statementYearSelect?.value);
+  if (selectedYear === null) {
+    return statementRows[statementRows.length - 1];
+  }
+  return statementRows.find((row) => row.year === selectedYear) ??
+    statementRows[statementRows.length - 1];
+}
+
+function getDecadeRows(statementRows) {
+  if (!statementRows || statementRows.length === 0) {
+    return [];
+  }
+  const selectedYear = parseNumber(statementYearSelect?.value);
+  const startYear =
+    selectedYear !== null ? selectedYear : statementRows[0].year;
+  const endYear = startYear + 10;
+  return statementRows.filter(
+    (row) => row.year >= startYear && row.year < endYear
+  );
+}
+
+function handleExportBalanceSheet() {
+  const statementRows = buildStatementRows({ showAlert: true });
+  if (!statementRows) {
+    return;
+  }
+  const row = getStatementRow(statementRows);
+  if (!row) {
+    window.alert("対象年度のデータがありません。");
+    return;
+  }
+  const birthDate = parseDate(birthDateInput.value);
+  const csv = buildBalanceSheetCsv(row, birthDate);
+  downloadCsvText(csv, `LifeWealth100_balance_sheet_${row.year}.csv`);
+}
+
+function handleExportProfitLoss() {
+  const statementRows = buildStatementRows({ showAlert: true });
+  if (!statementRows) {
+    return;
+  }
+  const row = getStatementRow(statementRows);
+  if (!row) {
+    window.alert("対象年度のデータがありません。");
+    return;
+  }
+  const birthDate = parseDate(birthDateInput.value);
+  const csv = buildProfitLossCsv(row, birthDate);
+  downloadCsvText(csv, `LifeWealth100_profit_loss_${row.year}.csv`);
+}
+
+function handleExportBalanceSheetDecade() {
+  const statementRows = buildStatementRows({ showAlert: true });
+  if (!statementRows) {
+    return;
+  }
+  const decadeRows = getDecadeRows(statementRows);
+  if (!decadeRows.length) {
+    window.alert("対象の10年データがありません。");
+    return;
+  }
+  const header =
+    "年度,年齢,対象月数,期首合計（円）,期首預金・現金・暗号資産（円）,期首株式(現物)（円）,期首投資信託（円）,期首債券（円）,期首保険（円）,期首年金（円）,期首ポイント（円）,期首その他の資産（円）,期末合計（円）,期末預金・現金・暗号資産（円）,期末株式(現物)（円）,期末投資信託（円）,期末債券（円）,期末保険（円）,期末年金（円）,期末ポイント（円）,期末その他の資産（円）";
+  const birthDate = parseDate(birthDateInput.value);
+  const lines = decadeRows.map((row) => buildBalanceSheetCsvLine(row, birthDate));
+  const csv = [header, ...lines].join("\n");
+  downloadCsvText(
+    csv,
+    `LifeWealth100_balance_sheet_${decadeRows[0].year}_to_${decadeRows[decadeRows.length - 1].year}.csv`
+  );
+}
+
+function handleExportProfitLossDecade() {
+  const statementRows = buildStatementRows({ showAlert: true });
+  if (!statementRows) {
+    return;
+  }
+  const decadeRows = getDecadeRows(statementRows);
+  if (!decadeRows.length) {
+    window.alert("対象の10年データがありません。");
+    return;
+  }
+  const header =
+    "年度,年齢,対象月数,収入（円）,支出（円）,収支（円）,運用益（円）,資産増減（円）,期首合計（円）,期末合計（円）";
+  const birthDate = parseDate(birthDateInput.value);
+  const lines = decadeRows.map((row) => buildProfitLossCsvLine(row, birthDate));
+  const csv = [header, ...lines].join("\n");
+  downloadCsvText(
+    csv,
+    `LifeWealth100_profit_loss_${decadeRows[0].year}_to_${decadeRows[decadeRows.length - 1].year}.csv`
+  );
 }
 
 function render() {
+  if (lastUpdated) {
+    lastUpdated.textContent = `更新日時: ${formatDateTime(new Date())}`;
+  }
+
   const birthDate = parseDate(birthDateInput.value);
   const currentAssets = parseNumber(currentAssetsInput.value);
-  const annualRatePercent = parseNumber(annualRateInput.value);
+  const annualRatePercent = 0;
   const retirementAgeYears = parseNumber(retirementAgeInput.value);
   const retirementIncomeEndAgeYears =
     parseNumber(retirementIncomeEndAgeInput.value) ?? 100;
@@ -1026,8 +1937,7 @@ function render() {
   const retireIncomeMap = mapIncomeInputs(retireIncomeInputs);
   const retireBaseIncome =
     (retireIncomeMap.salary || 0) +
-    (retireIncomeMap.bonus || 0) +
-    (retireIncomeMap.realestate || 0);
+    (retireIncomeMap.bonus || 0);
   const pensionIncomeTotal = sumInputs(pensionIncomeInputs);
   const ongoingIncome = (incomeMap.dividend || 0) + (incomeMap.other || 0);
   const retireIncomeTotal = retireBaseIncome;
@@ -1055,10 +1965,9 @@ function render() {
     retirementAgeYears !== null &&
     retirementIncomeEndAgeYears !== null &&
     retirementIncomeEndAgeYears >= retirementAgeYears;
-  const hasAssets =
-    currentAssets !== null && currentAssets >= 0 && annualRatePercent !== null;
+  const hasAssets = currentAssets !== null && currentAssets >= 0;
 
-  const annualRate = annualRatePercent !== null ? annualRatePercent / 100 : 0;
+  const annualRate = 0;
   const monthlyNetCash = incomeTotal - expenseTotal;
   const retirementMonthlyNetCash =
     retireIncomeTotal + ongoingIncome - retireExpenseTotal;
@@ -1117,6 +2026,7 @@ function render() {
             startDate: today,
             monthsRemaining,
             annualRate,
+            categoryRates: getSimulationContext()?.categoryRates,
             retirementAge: monthIndex(retirementDate),
             retirementIncomeEndAge: monthIndex(retirementIncomeEndDate),
             monthlyNetCash,
@@ -1158,6 +2068,7 @@ function render() {
   }
 
   if (!hasBirthDate || !hasRetirement || !hasAssets) {
+    updateStatementYearOptions(null);
     resultValue.textContent = "-";
     resultMeta.textContent = "入力値を確認してください。";
     return;
@@ -1179,17 +2090,31 @@ function render() {
   retirementDate = addYears(birthDate, retirementAgeYears);
   retirementIncomeEndDate = addYears(birthDate, retirementIncomeEndAgeYears);
 
-  const { assets } = simulateToAge100({
-    currentAssets,
-    annualRate,
-    retirementAge: monthIndex(retirementDate),
-    retirementIncomeEndAge: monthIndex(retirementIncomeEndDate),
-    monthlyNetCash,
-    retirementMonthlyNetCash,
-    postRetirementMonthlyNetCash,
-    monthsRemaining,
-    startMonthIndex: monthIndex(today),
-  });
+  const context = getSimulationContext();
+  const { assets } = context
+    ? simulateToAge100Detailed({
+        startDate: today,
+        monthsRemaining,
+        retirementAge: monthIndex(retirementDate),
+        retirementIncomeEndAge: monthIndex(retirementIncomeEndDate),
+        monthlyNetCash,
+        retirementMonthlyNetCash,
+        postRetirementMonthlyNetCash,
+        contributionSchedule,
+        categories: context.categories,
+        categoryRates: context.categoryRates,
+      })
+    : simulateToAge100({
+        currentAssets,
+        annualRate,
+        retirementAge: monthIndex(retirementDate),
+        retirementIncomeEndAge: monthIndex(retirementIncomeEndDate),
+        monthlyNetCash,
+        retirementMonthlyNetCash,
+        postRetirementMonthlyNetCash,
+        monthsRemaining,
+        startMonthIndex: monthIndex(today),
+      });
 
   resultValue.textContent = yenFormatter.format(Math.round(assets));
   resultValue.classList.remove("reveal");
@@ -1200,9 +2125,7 @@ function render() {
     ageMonths === 0 ? "0歳0か月" : `${ageYears}歳${ageRemainMonths}か月`;
   resultMeta.textContent = `前提: 誕生日${birthDateInput.value} / 現在年齢${ageLabel} / 定年${retirementAgeYears}歳 / 現在資産${yenFormatter.format(
     currentAssets
-  )} / 利回り${percentFormatter.format(
-    annualRatePercent
-  )}% / 月収${yenFormatter.format(incomeTotal)} / 月支出${yenFormatter.format(
+  )} / 月収${yenFormatter.format(incomeTotal)} / 月支出${yenFormatter.format(
     expenseTotal
   )} / 定年後月収${yenFormatter.format(
     retireIncomeTotal
@@ -1225,12 +2148,13 @@ function render() {
   );
 
   // Investment summary is handled before the main validation.
+
+  updateStatementYearOptions(buildStatementRows({ showAlert: false }));
 }
 
 [
   birthDateInput,
   currentAssetsInput,
-  annualRateInput,
   retirementAgeInput,
   retirementIncomeEndAgeInput,
   ...expenseInputs,
@@ -1245,6 +2169,10 @@ function render() {
   balanceUsdInput,
   balanceDcInput,
   balanceNissayInput,
+  rateStocksInput,
+  rateFundsInput,
+  rateBondsInput,
+  rateInsuranceInput,
   contribStocksInput,
   contribFundsInput,
   contribBondsInput,
@@ -1268,6 +2196,30 @@ importButton.addEventListener("click", applyImportedData);
 if (exportButton) {
   exportButton.addEventListener("click", handleExportCsv);
 }
+if (exportBalanceSheetButton) {
+  exportBalanceSheetButton.addEventListener("click", handleExportBalanceSheet);
+}
+if (exportProfitLossButton) {
+  exportProfitLossButton.addEventListener("click", handleExportProfitLoss);
+}
+if (exportBalanceSheetDecadeButton) {
+  exportBalanceSheetDecadeButton.addEventListener(
+    "click",
+    handleExportBalanceSheetDecade
+  );
+}
+if (exportProfitLossDecadeButton) {
+  exportProfitLossDecadeButton.addEventListener(
+    "click",
+    handleExportProfitLossDecade
+  );
+}
+if (addBondRowButton) {
+  addBondRowButton.addEventListener("click", () => {
+    createBondRow();
+    persistBondRows();
+  });
+}
 assetDataInput.addEventListener("input", markImportDirty);
 summaryDataInput.addEventListener("input", markImportDirty);
 
@@ -1276,6 +2228,7 @@ persistInputs.forEach((input) => {
 });
 
 loadPersistedInputs();
+loadBondRows();
 render();
 
 function setActivePage(pageId) {

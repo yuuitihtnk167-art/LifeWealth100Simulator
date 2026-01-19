@@ -161,6 +161,34 @@ button:hover {
   transform: translateY(-1px);
 }
 
+.export-panel {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+  display: grid;
+  gap: 12px;
+}
+
+.export-panel label {
+  margin-bottom: 0;
+}
+
+.export-panel select {
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  padding: 10px 14px;
+  font-size: 15px;
+  font-family: inherit;
+  color: var(--ink);
+  background: #fff;
+}
+
+.export-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
 .import-status {
   margin: 12px 0 0;
   color: var(--muted);
@@ -305,6 +333,85 @@ button:hover {
 
 .result-value.reveal {
   animation: reveal 0.5s ease;
+}
+
+.bond-table {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: auto;
+  max-height: 360px;
+  background: #fff;
+  margin-bottom: 12px;
+}
+
+.bond-table table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 520px;
+}
+
+.bond-table th,
+.bond-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.bond-table th {
+  position: sticky;
+  top: 0;
+  background: #fbf8f2;
+  color: var(--muted);
+  z-index: 1;
+}
+
+.bond-table input {
+  width: 140px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.bond-table select {
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.bond-table input.bond-name {
+  width: 220px;
+}
+
+.bond-table input.bond-name:focus {
+  width: 360px;
+}
+
+.bond-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bond-average {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.bond-table .bond-action button {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.update-footer {
+  margin-top: 24px;
+  text-align: right;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 @keyframes reveal {
