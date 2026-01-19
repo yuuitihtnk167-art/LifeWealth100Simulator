@@ -18,6 +18,10 @@ const bondTableBody = document.getElementById("bondTableBody");
 const addBondRowButton = document.getElementById("addBondRow");
 const bondAverageRate = document.getElementById("bondAverageRate");
 const importStatus = document.getElementById("importStatus");
+const syncDataInput = document.getElementById("syncData");
+const exportSyncButton = document.getElementById("exportSync");
+const importSyncButton = document.getElementById("importSync");
+const syncStatus = document.getElementById("syncStatus");
 const expenseInputs = Array.from(document.querySelectorAll(".expense-input"));
 const monthlyExpense = document.getElementById("monthlyExpense");
 const incomeInputs = Array.from(document.querySelectorAll(".income-input"));
@@ -78,7 +82,10 @@ let importDirty = false;
 const STORAGE_KEY = "lifewealth100.inputs.v1";
 const BOND_STORAGE_KEY = "lifewealth100.bonds.v1";
 const persistInputs = Array.from(document.querySelectorAll("input, textarea")).filter(
-  (el) => el.type !== "button" && el.type !== "submit"
+  (el) =>
+    el.type !== "button" &&
+    el.type !== "submit" &&
+    !el.dataset.noPersist
 );
 
 const yenFormatter = new Intl.NumberFormat("ja-JP", {
@@ -1221,6 +1228,91 @@ function persistInputsToStorage() {
   }
 }
 
+function safeParseJson(raw, fallback) {
+  if (!raw) {
+    return fallback;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function buildSyncPayload() {
+  persistInputsToStorage();
+  persistBondRows();
+  const inputs = safeParseJson(localStorage.getItem(STORAGE_KEY), {});
+  const bonds = safeParseJson(localStorage.getItem(BOND_STORAGE_KEY), []);
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    inputs,
+    bonds,
+  };
+}
+
+function handleExportSync() {
+  if (!syncDataInput) {
+    return;
+  }
+  const payload = buildSyncPayload();
+  syncDataInput.value = JSON.stringify(payload, null, 2);
+  if (syncStatus) {
+    syncStatus.textContent = "エクスポート済み";
+  }
+}
+
+function handleImportSync() {
+  if (!syncDataInput) {
+    return;
+  }
+  const raw = syncDataInput.value.trim();
+  if (!raw) {
+    window.alert("同期データが空です。");
+    return;
+  }
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    window.alert("同期データのJSONが正しくありません。");
+    return;
+  }
+  if (!isPlainObject(data)) {
+    window.alert("同期データの形式が正しくありません。");
+    return;
+  }
+  const inputs = isPlainObject(data.inputs) ? data.inputs : null;
+  const bonds = Array.isArray(data.bonds) ? data.bonds : null;
+  if (!inputs && !bonds) {
+    window.alert("同期データに読み込める内容がありません。");
+    return;
+  }
+  try {
+    if (inputs) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(inputs));
+    }
+    if (bonds) {
+      localStorage.setItem(BOND_STORAGE_KEY, JSON.stringify(bonds));
+    }
+  } catch {
+    window.alert("同期データの保存に失敗しました。");
+    return;
+  }
+  loadPersistedInputs();
+  loadBondRows();
+  render();
+  if (syncStatus) {
+    syncStatus.textContent = "インポート済み";
+  }
+}
+
 function extractSectionTotals(text) {
   const lines = text
     .split(/\r?\n/)
@@ -2213,6 +2305,12 @@ if (exportProfitLossDecadeButton) {
     "click",
     handleExportProfitLossDecade
   );
+}
+if (exportSyncButton) {
+  exportSyncButton.addEventListener("click", handleExportSync);
+}
+if (importSyncButton) {
+  importSyncButton.addEventListener("click", handleImportSync);
 }
 if (addBondRowButton) {
   addBondRowButton.addEventListener("click", () => {
