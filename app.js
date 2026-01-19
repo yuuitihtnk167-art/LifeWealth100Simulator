@@ -50,7 +50,6 @@ const balanceBondsInput = document.getElementById("balanceBonds");
 const balanceInsuranceInput = document.getElementById("balanceInsurance");
 const balanceUsdInput = document.getElementById("balanceUsd");
 const balanceDcInput = document.getElementById("balanceDc");
-const balanceNissayInput = document.getElementById("balanceNissay");
 const rateStocksInput = document.getElementById("rateStocks");
 const rateFundsInput = document.getElementById("rateFunds");
 const rateBondsInput = document.getElementById("rateBonds");
@@ -61,20 +60,25 @@ const contribBondsInput = document.getElementById("contribBonds");
 const contribInsuranceInput = document.getElementById("contribInsurance");
 const contribUsdInput = document.getElementById("contribUsd");
 const contribDcInput = document.getElementById("contribDc");
-const contribNissayInput = document.getElementById("contribNissay");
 const endAgeStocksInput = document.getElementById("endAgeStocks");
 const endAgeFundsInput = document.getElementById("endAgeFunds");
 const endAgeBondsInput = document.getElementById("endAgeBonds");
 const endAgeInsuranceInput = document.getElementById("endAgeInsurance");
 const endAgeUsdInput = document.getElementById("endAgeUsd");
 const endAgeDcInput = document.getElementById("endAgeDc");
-const endAgeNissayInput = document.getElementById("endAgeNissay");
 const investmentTotal = document.getElementById("investmentTotal");
 const cashBalance = document.getElementById("cashBalance");
 const investmentContribTotal = document.getElementById("investmentContribTotal");
 const investmentAfter = document.getElementById("investmentAfter");
 const cashAfter = document.getElementById("cashAfter");
 const investmentAlert = document.getElementById("investmentAlert");
+const insuranceDetailButton = document.getElementById("insuranceDetailButton");
+const insuranceCurrentAmount = document.getElementById("insuranceCurrentAmount");
+const insuranceScheduleBody = document.getElementById("insuranceScheduleBody");
+const addInsuranceScheduleRowButton = document.getElementById(
+  "addInsuranceScheduleRow"
+);
+const insuranceFutureBody = document.getElementById("insuranceFutureBody");
 const tabButtons = Array.from(document.querySelectorAll(".tab-button"));
 const pages = Array.from(document.querySelectorAll(".page"));
 const resultValue = document.getElementById("resultValue");
@@ -84,6 +88,7 @@ let importDirty = false;
 
 const STORAGE_KEY = "lifewealth100.inputs.v1";
 const BOND_STORAGE_KEY = "lifewealth100.bonds.v1";
+const INSURANCE_SCHEDULE_KEY = "lifewealth100.insurance.schedule.v1";
 const persistInputs = Array.from(document.querySelectorAll("input, textarea")).filter(
   (el) =>
     el.type !== "button" &&
@@ -102,7 +107,7 @@ const percentFormatter = new Intl.NumberFormat("ja-JP", {
 });
 
 function isCompoundingCategory(key) {
-  return key === "funds" || key === "insurance" || key === "nissay";
+  return key === "funds" || key === "insurance";
 }
 
 function toYenAmount(value) {
@@ -144,6 +149,18 @@ function writeBondStorage(data) {
         usdRate: data.usdRate ?? "",
       })
     );
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function readInsuranceSchedule() {
+  return safeParseJson(localStorage.getItem(INSURANCE_SCHEDULE_KEY), []);
+}
+
+function writeInsuranceSchedule(rows) {
+  try {
+    localStorage.setItem(INSURANCE_SCHEDULE_KEY, JSON.stringify(rows));
   } catch {
     // Ignore storage failures.
   }
@@ -229,6 +246,7 @@ function simulateToAge100Detailed({
   categoryRates,
   bondMaturities,
   usdRate,
+  insuranceContributionSchedule,
 }) {
   const months = Math.max(0, monthsRemaining);
   let data = { ...categories };
@@ -240,7 +258,6 @@ function simulateToAge100Detailed({
     "bonds",
     "insurance",
     "dc",
-    "nissay",
     "other",
   ];
 
@@ -265,10 +282,18 @@ function simulateToAge100Detailed({
 
     contributionSchedule.forEach((item) => {
       if (monthIndexValue < item.endMonthIndex) {
+        const amount =
+          item.category === "insurance"
+            ? getInsuranceContributionAmount(
+                monthIndexValue,
+                insuranceContributionSchedule,
+                item.amount
+              )
+            : item.amount;
         if (item.category !== "cash") {
-          data.cash -= item.amount;
+          data.cash -= amount;
         }
-        data[item.category] += item.amount;
+        data[item.category] += amount;
       }
     });
 
@@ -278,16 +303,66 @@ function simulateToAge100Detailed({
   return { months, assets: sumCategoryTotal(data) };
 }
 
-function getContributionForMonth(monthIndexValue, schedule) {
+function getContributionForMonth(
+  monthIndexValue,
+  schedule,
+  insuranceContributionSchedule
+) {
   if (!schedule || schedule.length === 0) {
     return 0;
   }
   return schedule.reduce((sum, item) => {
     if (monthIndexValue < item.endMonthIndex) {
-      return sum + item.amount;
+      const amount =
+        item.category === "insurance"
+          ? getInsuranceContributionAmount(
+              monthIndexValue,
+              insuranceContributionSchedule,
+              item.amount
+            )
+          : item.amount;
+      return sum + amount;
     }
     return sum;
   }, 0);
+}
+
+function buildInsuranceContributionSchedule(birthDate, rows) {
+  if (!birthDate || !rows || rows.length === 0) {
+    return [];
+  }
+  const entries = rows
+    .map((row) => {
+      const age = parseNumber(row.age);
+      const amount = parseNumber(row.amount);
+      if (age === null || amount === null) {
+        return null;
+      }
+      return {
+        monthIndex: monthIndex(addYears(birthDate, age)),
+        amount,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.monthIndex - b.monthIndex);
+  return entries;
+}
+
+function getInsuranceContributionAmount(
+  monthIndexValue,
+  schedule,
+  fallbackAmount
+) {
+  if (!schedule || schedule.length === 0) {
+    return fallbackAmount;
+  }
+  let target = null;
+  schedule.forEach((entry) => {
+    if (entry.monthIndex <= monthIndexValue) {
+      target = entry.amount;
+    }
+  });
+  return target === null ? fallbackAmount : target;
 }
 
 function buildBondMaturitySchedule(bondMaturities, usdRate) {
@@ -324,6 +399,7 @@ function applyBondMaturities(data, schedule, monthIndexValue) {
   return transferable;
 }
 
+
 function findNegativeCashMonth({
   startCash,
   monthlyNetCash,
@@ -332,6 +408,7 @@ function findNegativeCashMonth({
   retirementAge,
   retirementIncomeEndAge,
   contributionSchedule,
+  insuranceContributionSchedule,
   monthsRemaining,
   startMonthIndex,
 }) {
@@ -347,7 +424,11 @@ function findNegativeCashMonth({
       cashFlow = postRetirementMonthlyNetCash;
     }
     cash += cashFlow;
-    cash -= getContributionForMonth(monthIndexValue, contributionSchedule);
+    cash -= getContributionForMonth(
+      monthIndexValue,
+      contributionSchedule,
+      insuranceContributionSchedule
+    );
     if (cash < 0) {
       return monthIndexValue;
     }
@@ -369,6 +450,7 @@ function simulateAnnualSeries({
   categories,
   bondMaturities,
   usdRate,
+  insuranceContributionSchedule,
 }) {
   const monthlyRate = Math.pow(1 + annualRate, 1 / 12) - 1;
   const rows = [];
@@ -382,7 +464,6 @@ function simulateAnnualSeries({
     "bonds",
     "insurance",
     "dc",
-    "nissay",
     "other",
   ];
 
@@ -407,10 +488,18 @@ function simulateAnnualSeries({
 
     contributionSchedule.forEach((item) => {
       if (monthIndexValue < item.endMonthIndex) {
+        const amount =
+          item.category === "insurance"
+            ? getInsuranceContributionAmount(
+                monthIndexValue,
+                insuranceContributionSchedule,
+                item.amount
+              )
+            : item.amount;
         if (item.category !== "cash") {
-          data.cash -= item.amount;
+          data.cash -= amount;
         }
-        data[item.category] += item.amount;
+        data[item.category] += amount;
       }
     });
 
@@ -427,7 +516,6 @@ function simulateAnnualSeries({
         data.bonds +
         data.insurance +
         data.dc +
-        data.nissay +
         data.points +
         data.other;
       rows.push({
@@ -449,7 +537,6 @@ function sumCategoryTotal(data) {
     data.bonds +
     data.insurance +
     data.dc +
-    data.nissay +
     data.points +
     data.other
   );
@@ -472,6 +559,7 @@ function simulateAnnualStatements({
   categories,
   bondMaturities,
   usdRate,
+  insuranceContributionSchedule,
 }) {
   const monthlyRate = Math.pow(1 + annualRate, 1 / 12) - 1;
   const rows = [];
@@ -485,7 +573,6 @@ function simulateAnnualStatements({
     "bonds",
     "insurance",
     "dc",
-    "nissay",
     "other",
   ];
 
@@ -503,7 +590,6 @@ function simulateAnnualStatements({
     bonds: 0,
     insurance: 0,
     dc: 0,
-    nissay: 0,
     other: 0,
   };
   let yearGainByCategory = {
@@ -512,7 +598,6 @@ function simulateAnnualStatements({
     bonds: 0,
     insurance: 0,
     dc: 0,
-    nissay: 0,
     other: 0,
   };
   let yearWorkMonths = 0;
@@ -563,14 +648,22 @@ function simulateAnnualStatements({
 
     contributionSchedule.forEach((item) => {
       if (monthIndexValue < item.endMonthIndex) {
-        yearContribution += item.amount;
+        const amount =
+          item.category === "insurance"
+            ? getInsuranceContributionAmount(
+                monthIndexValue,
+                insuranceContributionSchedule,
+                item.amount
+              )
+            : item.amount;
+        yearContribution += amount;
         if (yearContributionByCategory[item.category] !== undefined) {
-          yearContributionByCategory[item.category] += item.amount;
+          yearContributionByCategory[item.category] += amount;
         }
         if (item.category !== "cash") {
-          data.cash -= item.amount;
+          data.cash -= amount;
         }
-        data[item.category] += item.amount;
+        data[item.category] += amount;
       }
     });
 
@@ -579,7 +672,6 @@ function simulateAnnualStatements({
       maturitySchedule,
       monthIndexValue
     );
-
     yearInvestmentGain += monthlyInvestmentGain;
     yearMonths += 1;
 
@@ -635,7 +727,6 @@ function simulateAnnualStatements({
         bonds: 0,
         insurance: 0,
         dc: 0,
-        nissay: 0,
         other: 0,
       };
       yearGainByCategory = {
@@ -644,7 +735,6 @@ function simulateAnnualStatements({
         bonds: 0,
         insurance: 0,
         dc: 0,
-        nissay: 0,
         other: 0,
       };
       yearWorkMonths = 0;
@@ -741,11 +831,6 @@ function buildContributionSchedule(birthDate) {
       amount: parseNumber(contribDcInput.value) || 0,
       endMonthIndex: toEndMonth(endAgeDcInput),
     },
-    {
-      category: "nissay",
-      amount: parseNumber(contribNissayInput.value) || 0,
-      endMonthIndex: toEndMonth(endAgeNissayInput),
-    },
   ];
 }
 
@@ -761,20 +846,8 @@ function buildInitialCategories(summaryBreakdown, currentAssets) {
         summaryBreakdown.pension +
         summaryBreakdown.points +
         summaryBreakdown.other;
-    const dcInput = parseNumber(balanceDcInput.value) || 0;
-    const nissayInput = parseNumber(balanceNissayInput.value) || 0;
     const pensionTotal = summaryBreakdown.pension || 0;
-    const pensionInputTotal = dcInput + nissayInput;
-    let dc = 0;
-    let nissay = 0;
-    if (pensionTotal > 0) {
-      if (pensionInputTotal > 0) {
-        dc = pensionTotal * (dcInput / pensionInputTotal);
-        nissay = pensionTotal * (nissayInput / pensionInputTotal);
-      } else {
-        dc = pensionTotal;
-      }
-    }
+    const dc = pensionTotal > 0 ? pensionTotal : 0;
     const cash =
       total -
       (summaryBreakdown.stocks +
@@ -782,7 +855,6 @@ function buildInitialCategories(summaryBreakdown, currentAssets) {
         summaryBreakdown.bonds +
         summaryBreakdown.insurance +
         dc +
-        nissay +
         summaryBreakdown.points +
         summaryBreakdown.other);
     return {
@@ -792,7 +864,6 @@ function buildInitialCategories(summaryBreakdown, currentAssets) {
       bonds: summaryBreakdown.bonds || 0,
       insurance: summaryBreakdown.insurance || 0,
       dc,
-      nissay,
       points: summaryBreakdown.points || 0,
       other: summaryBreakdown.other || 0,
       total: total || 0,
@@ -804,10 +875,9 @@ function buildInitialCategories(summaryBreakdown, currentAssets) {
   const bonds = parseNumber(balanceBondsInput.value) || 0;
   const insurance = parseNumber(balanceInsuranceInput.value) || 0;
   const dc = parseNumber(balanceDcInput.value) || 0;
-  const nissay = parseNumber(balanceNissayInput.value) || 0;
   const cash =
     (parseNumber(currentAssets) || 0) -
-    (stocks + funds + bonds + insurance + dc + nissay);
+    (stocks + funds + bonds + insurance + dc);
 
   return {
     cash,
@@ -816,7 +886,6 @@ function buildInitialCategories(summaryBreakdown, currentAssets) {
     bonds,
     insurance,
     dc,
-    nissay,
     points: 0,
     other: 0,
     total: currentAssets || 0,
@@ -907,7 +976,7 @@ function downloadCsv(rows, birthDate) {
       toCsvNumber(row.funds),
       toCsvNumber(row.bonds),
       toCsvNumber(row.insurance),
-      toCsvNumber((row.dc || 0) + (row.nissay || 0)),
+      toCsvNumber(row.dc || 0),
       toCsvNumber(row.points),
       toCsvNumber(row.other),
     ].join(",")
@@ -995,7 +1064,6 @@ function sumInvestmentsFromList(text) {
     insurance: 0,
     usd: 0,
     dc: 0,
-    nissay: 0,
   };
 
   table.dataRows.forEach((row) => {
@@ -1028,7 +1096,7 @@ function sumInvestmentsFromList(text) {
     }
     if (/年金/.test(type)) {
       if (/ニッセイみらいのカタチ/.test(name)) {
-        totals.nissay += amount;
+        totals.dc += amount;
         return;
       }
       if (/DC|確定拠出|ベネフィット|あおぞら/.test(name)) {
@@ -1044,8 +1112,7 @@ function sumInvestmentsFromList(text) {
     totals.bonds ||
     totals.insurance ||
     totals.usd ||
-    totals.dc ||
-    totals.nissay;
+    totals.dc;
   return hasAny ? totals : sumInvestmentsFromText(text);
 }
 
@@ -1062,7 +1129,6 @@ function sumInvestmentsFromText(text) {
     insurance: 0,
     usd: 0,
     dc: 0,
-    nissay: 0,
   };
 
   let currentSection = "";
@@ -1127,7 +1193,7 @@ function sumInvestmentsFromText(text) {
     }
     if (currentSection === "pension") {
       if (/ニッセイみらいのカタチ/.test(line)) {
-        totals.nissay += amount;
+        totals.dc += amount;
         matched = true;
         return;
       }
@@ -1198,6 +1264,38 @@ function loadPersistedInputs() {
     const data = JSON.parse(raw);
     if (!data || typeof data !== "object") {
       return;
+    }
+    let migrated = false;
+    if (Object.prototype.hasOwnProperty.call(data, "balanceNissay")) {
+      const nissay = parseNumber(data.balanceNissay);
+      const current = parseNumber(data.balanceDc) || 0;
+      if (nissay !== null) {
+        data.balanceDc = String(Math.round(current + nissay));
+      }
+      delete data.balanceNissay;
+      migrated = true;
+    }
+    if (Object.prototype.hasOwnProperty.call(data, "contribNissay")) {
+      const nissay = parseNumber(data.contribNissay);
+      const current = parseNumber(data.contribDc) || 0;
+      if (nissay !== null) {
+        data.contribDc = String(Math.round(current + nissay));
+      }
+      delete data.contribNissay;
+      migrated = true;
+    }
+    if (Object.prototype.hasOwnProperty.call(data, "endAgeNissay")) {
+      if (
+        !Object.prototype.hasOwnProperty.call(data, "endAgeDc") ||
+        data.endAgeDc === ""
+      ) {
+        data.endAgeDc = data.endAgeNissay;
+      }
+      delete data.endAgeNissay;
+      migrated = true;
+    }
+    if (migrated) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     }
     persistInputs.forEach((el, index) => {
       const key = getPersistKey(el, index);
@@ -1348,6 +1446,130 @@ function serializeBondRow(row) {
     data[input.dataset.key] = input.value;
   });
   return data;
+}
+
+function createInsuranceScheduleRow(data = {}) {
+  if (!insuranceScheduleBody) {
+    return;
+  }
+  const row = document.createElement("tr");
+
+  const ageInput = document.createElement("input");
+  ageInput.type = "number";
+  ageInput.min = "0";
+  ageInput.max = "120";
+  ageInput.step = "1";
+  ageInput.inputMode = "numeric";
+  ageInput.value = data.age ?? "";
+  ageInput.dataset.key = "age";
+
+  const amountInput = document.createElement("input");
+  amountInput.type = "number";
+  amountInput.min = "0";
+  amountInput.step = "1000";
+  amountInput.inputMode = "numeric";
+  amountInput.value = data.amount ?? "";
+  amountInput.dataset.key = "amount";
+
+  const removeButton = document.createElement("button");
+  removeButton.type = "button";
+  removeButton.textContent = "削除";
+  removeButton.addEventListener("click", () => {
+    row.remove();
+    persistInsuranceScheduleRows();
+  });
+
+  const cells = [ageInput, amountInput].map((input) => {
+    const td = document.createElement("td");
+    td.appendChild(input);
+    return td;
+  });
+  const actionCell = document.createElement("td");
+  actionCell.className = "insurance-action";
+  actionCell.appendChild(removeButton);
+  cells.push(actionCell);
+
+  cells.forEach((cell) => row.appendChild(cell));
+  insuranceScheduleBody.appendChild(row);
+
+  [ageInput, amountInput].forEach((input) => {
+    input.addEventListener("input", persistInsuranceScheduleRows);
+  });
+}
+
+function serializeInsuranceScheduleRow(row) {
+  const data = {};
+  row.querySelectorAll("input").forEach((input) => {
+    data[input.dataset.key] = input.value;
+  });
+  return data;
+}
+
+function persistInsuranceScheduleRows() {
+  if (!insuranceScheduleBody) {
+    return;
+  }
+  const rows = Array.from(insuranceScheduleBody.querySelectorAll("tr")).map((row) =>
+    serializeInsuranceScheduleRow(row)
+  );
+  writeInsuranceSchedule(rows);
+  updateInsuranceDetailSummary();
+}
+
+function loadInsuranceScheduleRows() {
+  if (!insuranceScheduleBody) {
+    return;
+  }
+  insuranceScheduleBody.innerHTML = "";
+  const rows = readInsuranceSchedule();
+  if (!rows.length) {
+    createInsuranceScheduleRow();
+  } else {
+    rows.forEach((row) => createInsuranceScheduleRow(row));
+  }
+  updateInsuranceDetailSummary();
+}
+
+function updateInsuranceDetailSummary() {
+  if (!insuranceCurrentAmount || !insuranceFutureBody) {
+    return;
+  }
+  const currentAmount = parseNumber(contribInsuranceInput.value);
+  insuranceCurrentAmount.textContent = Number.isFinite(currentAmount)
+    ? yenFormatter.format(currentAmount)
+    : "-";
+
+  const rawRows = readInsuranceSchedule();
+  const map = new Map();
+  rawRows.forEach((row) => {
+    const age = parseNumber(row.age);
+    const amount = parseNumber(row.amount);
+    if (age === null || amount === null) {
+      return;
+    }
+    map.set(age, amount);
+  });
+  const sorted = Array.from(map.entries()).sort((a, b) => a[0] - b[0]);
+  insuranceFutureBody.innerHTML = "";
+  if (!sorted.length) {
+    const emptyRow = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 2;
+    cell.textContent = "変更予定がありません。";
+    emptyRow.appendChild(cell);
+    insuranceFutureBody.appendChild(emptyRow);
+    return;
+  }
+  sorted.forEach(([age, amount]) => {
+    const row = document.createElement("tr");
+    const ageCell = document.createElement("td");
+    ageCell.textContent = `${age}歳`;
+    const amountCell = document.createElement("td");
+    amountCell.textContent = yenFormatter.format(amount);
+    row.appendChild(ageCell);
+    row.appendChild(amountCell);
+    insuranceFutureBody.appendChild(row);
+  });
 }
 
 function persistBondRows() {
@@ -1757,8 +1979,8 @@ function sumInvestmentsFromSummary(text) {
     bonds: getAmount(/債券/),
     insurance: getAmount(/保険/),
     usd: getAmount(/ドル|外貨/),
-    dc: getAmount(/確定拠出|年金/),
-    nissay: getAmount(/ニッセイみらいのカタチ/),
+    dc:
+      getAmount(/確定拠出|年金/) + getAmount(/ニッセイみらいのカタチ/),
   };
 }
 
@@ -1788,7 +2010,6 @@ function applyImportedData() {
     balanceInsuranceInput.value = Math.round(investmentTotals.insurance);
     balanceUsdInput.value = Math.round(investmentTotals.usd);
     balanceDcInput.value = Math.round(investmentTotals.dc);
-    balanceNissayInput.value = Math.round(investmentTotals.nissay);
   }
 
   importDirty = false;
@@ -1825,6 +2046,7 @@ function handleExportCsv() {
     categories: context.categories,
     bondMaturities: context.bondMaturities,
     usdRate: context.usdRate,
+    insuranceContributionSchedule: context.insuranceContributionSchedule,
   });
 
   if (!rows.length) {
@@ -1877,10 +2099,6 @@ function getSimulationContext() {
         ? defaultMonthlyRate
         : toMonthlyRate(rateInsurance / 100),
     dc: 0,
-    nissay:
-      rateInsurance === null
-        ? defaultMonthlyRate
-        : toMonthlyRate(rateInsurance / 100),
     other: 0,
   };
   const storedBonds = readBondStorage();
@@ -1890,6 +2108,10 @@ function getSimulationContext() {
     currency: row.currency || "JPY",
     faceValue: parseNumber(row.faceValue) || 0,
   }));
+  const insuranceContributionSchedule = buildInsuranceContributionSchedule(
+    birthDate,
+    readInsuranceSchedule()
+  );
   const expenseTotal = sumInputs(expenseInputs);
   const incomeTotal = sumInputs(incomeInputs);
   const retireExpenseTotal = sumInputs(retireExpenseInputs);
@@ -1909,7 +2131,6 @@ function getSimulationContext() {
     bonds: initial.bonds,
     insurance: initial.insurance,
     dc: initial.dc,
-    nissay: initial.nissay,
     points: initial.points,
     other: initial.other,
   };
@@ -1936,6 +2157,7 @@ function getSimulationContext() {
     categories,
     bondMaturities,
     usdRate,
+    insuranceContributionSchedule,
   };
 }
 
@@ -1965,6 +2187,7 @@ function buildStatementRows({ showAlert }) {
     categories: context.categories,
     bondMaturities: context.bondMaturities,
     usdRate: context.usdRate,
+    insuranceContributionSchedule: context.insuranceContributionSchedule,
   });
 
   if (!rows.length) {
@@ -2015,15 +2238,34 @@ function updateStatementYearOptions(statementRows) {
   }
 
   const selectedYear = parseNumber(statementYearSelect.value);
-  statementRows.forEach((row) => {
+  const currentYear = new Date().getFullYear();
+  const sortedRows = [...statementRows].sort((a, b) => b.year - a.year);
+  let currentRowIndex = sortedRows.findIndex((row) => row.year === currentYear);
+  if (currentRowIndex === -1) {
+    let closestIndex = 0;
+    let closestDiff = Infinity;
+    sortedRows.forEach((row, index) => {
+      const diff = Math.abs(row.year - currentYear);
+      if (diff < closestDiff) {
+        closestDiff = diff;
+        closestIndex = index;
+      }
+    });
+    currentRowIndex = closestIndex;
+  }
+  if (currentRowIndex > 0) {
+    const [currentRow] = sortedRows.splice(currentRowIndex, 1);
+    sortedRows.unshift(currentRow);
+  }
+  sortedRows.forEach((row) => {
     const option = document.createElement("option");
     option.value = row.year;
     option.textContent =
       row.months < 12 ? `${row.year}年（${row.months}か月）` : `${row.year}年`;
     statementYearSelect.appendChild(option);
   });
-  const matched = statementRows.find((row) => row.year === selectedYear);
-  const fallbackYear = statementRows[statementRows.length - 1].year;
+  const matched = sortedRows.find((row) => row.year === selectedYear);
+  const fallbackYear = sortedRows[0].year;
   statementYearSelect.value = String(matched ? matched.year : fallbackYear);
   statementYearSelect.disabled = false;
   if (exportBalanceSheetButton) {
@@ -2052,7 +2294,7 @@ function gainForCategoryInBalance(row, key) {
 }
 
 function sumPensionFromData(data) {
-  return (data.dc || 0) + (data.nissay || 0);
+  return data.dc || 0;
 }
 
 function buildBalanceSheetCsvLine(row, birthDate) {
@@ -2064,7 +2306,6 @@ function buildBalanceSheetCsvLine(row, birthDate) {
     row.start.bonds,
     row.start.insurance,
     row.start.dc,
-    row.start.nissay,
     row.start.points,
     row.start.other,
   ]);
@@ -2083,7 +2324,6 @@ function buildBalanceSheetCsvLine(row, birthDate) {
   const investmentGainExpression = buildSignedExpression([
     row.gainsByCategory.funds,
     row.gainsByCategory.insurance,
-    row.gainsByCategory.nissay,
   ]);
   const bondMaturityExpression = toCsvNumber(row.bondMaturity || 0);
   const cashEndExpression = `${toCsvNumber(row.start.cash)}+(${cashIncomeExpression})-(${expenseExpression})-${toCsvNumber(
@@ -2104,7 +2344,7 @@ function buildBalanceSheetCsvLine(row, birthDate) {
     csvCellWithFormula(row.start.insurance, `${toCsvNumber(row.start.insurance)}`),
     csvCellWithFormula(
       sumPensionFromData(row.start),
-      buildSignedExpression([row.start.dc, row.start.nissay])
+      buildSignedExpression([row.start.dc])
     ),
     csvCellWithFormula(row.start.points, `${toCsvNumber(row.start.points)}`),
     csvCellWithFormula(row.start.other, `${toCsvNumber(row.start.other)}`),
@@ -2147,10 +2387,8 @@ function buildBalanceSheetCsvLine(row, birthDate) {
       sumPensionFromData(row.end),
       buildSignedExpression([
         row.start.dc,
-        row.start.nissay,
         row.contributionsByCategory.dc,
-        row.contributionsByCategory.nissay,
-        gainForCategoryInBalance(row, "nissay"),
+        gainForCategoryInBalance(row, "dc"),
       ])
     ),
     csvCellWithFormula(
@@ -2184,7 +2422,6 @@ function buildProfitLossCsvLine(row, birthDate) {
     row.start.bonds,
     row.start.insurance,
     row.start.dc,
-    row.start.nissay,
     row.start.points,
     row.start.other,
   ]);
@@ -2206,7 +2443,6 @@ function buildProfitLossCsvLine(row, birthDate) {
     row.gainsByCategory.bonds,
     row.gainsByCategory.insurance,
     row.gainsByCategory.dc,
-    row.gainsByCategory.nissay,
     row.gainsByCategory.other,
   ]);
   const totalChangeExpression = `(${netExpression})+(${investmentGainExpression})`;
@@ -2353,16 +2589,14 @@ function render() {
     (parseNumber(balanceBondsInput.value) || 0) +
     (parseNumber(balanceInsuranceInput.value) || 0) +
     (parseNumber(balanceUsdInput.value) || 0) +
-    (parseNumber(balanceDcInput.value) || 0) +
-    (parseNumber(balanceNissayInput.value) || 0);
+    (parseNumber(balanceDcInput.value) || 0);
   const investmentContributionTotal =
     (parseNumber(contribStocksInput.value) || 0) +
     (parseNumber(contribFundsInput.value) || 0) +
     (parseNumber(contribBondsInput.value) || 0) +
     (parseNumber(contribInsuranceInput.value) || 0) +
     (parseNumber(contribUsdInput.value) || 0) +
-    (parseNumber(contribDcInput.value) || 0) +
-    (parseNumber(contribNissayInput.value) || 0);
+    (parseNumber(contribDcInput.value) || 0);
 
   const today = new Date();
   const hasBirthDate = birthDate !== null && birthDate <= today;
@@ -2424,7 +2658,6 @@ function render() {
             bonds: initial.bonds,
             insurance: initial.insurance,
             dc: initial.dc,
-            nissay: initial.nissay,
             points: initial.points,
             other: initial.other,
           };
@@ -2442,6 +2675,8 @@ function render() {
             categories,
             bondMaturities: getSimulationContext()?.bondMaturities,
             usdRate: getSimulationContext()?.usdRate,
+            insuranceContributionSchedule:
+              getSimulationContext()?.insuranceContributionSchedule,
           });
           negativeRow = rows.find((row) => row.cash < 0);
         }
@@ -2500,7 +2735,7 @@ function render() {
 
   const context = getSimulationContext();
   const { assets } = context
-    ? simulateToAge100Detailed({
+      ? simulateToAge100Detailed({
         startDate: today,
         monthsRemaining,
         retirementAge: monthIndex(retirementDate),
@@ -2513,6 +2748,7 @@ function render() {
         categoryRates: context.categoryRates,
         bondMaturities: context.bondMaturities,
         usdRate: context.usdRate,
+        insuranceContributionSchedule: context.insuranceContributionSchedule,
       })
     : simulateToAge100({
         currentAssets,
@@ -2560,6 +2796,7 @@ function render() {
   // Investment summary is handled before the main validation.
 
   updateStatementYearOptions(buildStatementRows({ showAlert: false }));
+  updateInsuranceDetailSummary();
 }
 
 [
@@ -2578,7 +2815,6 @@ function render() {
   balanceInsuranceInput,
   balanceUsdInput,
   balanceDcInput,
-  balanceNissayInput,
   rateStocksInput,
   rateFundsInput,
   rateBondsInput,
@@ -2589,14 +2825,12 @@ function render() {
   contribInsuranceInput,
   contribUsdInput,
   contribDcInput,
-  contribNissayInput,
   endAgeStocksInput,
   endAgeFundsInput,
   endAgeBondsInput,
   endAgeInsuranceInput,
   endAgeUsdInput,
   endAgeDcInput,
-  endAgeNissayInput,
 ].forEach((input) => {
   input.addEventListener("input", render);
   input.addEventListener("input", persistInputsToStorage);
@@ -2680,6 +2914,17 @@ if (sortBondRowsButton) {
     sortBondRowsByMaturity();
   });
 }
+if (insuranceDetailButton) {
+  insuranceDetailButton.addEventListener("click", () => {
+    setActivePage("insurance-detail");
+  });
+}
+if (addInsuranceScheduleRowButton) {
+  addInsuranceScheduleRowButton.addEventListener("click", () => {
+    createInsuranceScheduleRow();
+    persistInsuranceScheduleRows();
+  });
+}
 assetDataInput.addEventListener("input", markImportDirty);
 summaryDataInput.addEventListener("input", markImportDirty);
 
@@ -2689,6 +2934,7 @@ persistInputs.forEach((input) => {
 
 loadPersistedInputs();
 loadBondRows();
+loadInsuranceScheduleRows();
 render();
 
 function setActivePage(pageId) {

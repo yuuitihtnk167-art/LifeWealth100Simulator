@@ -379,7 +379,7 @@
             </label>
           </div>
           <div class="investment-item">
-            <h3>保険</h3>
+            <h3>積立保険</h3>
             <label>
               残高（円）
               <input id="balanceInsurance" type="number" min="0" step="1000" inputmode="numeric">
@@ -396,9 +396,10 @@
               積立終了年齢
               <input id="endAgeInsurance" type="number" min="0" max="120" step="1" value="65" required>
             </label>
+            <button id="insuranceDetailButton" type="button">保険料詳細</button>
           </div>
           <div class="investment-item">
-            <h3>ドル</h3>
+            <h3>ドル積立</h3>
             <label>
               残高（円換算）
               <input id="balanceUsd" type="number" min="0" step="1000" inputmode="numeric">
@@ -413,7 +414,7 @@
             </label>
           </div>
           <div class="investment-item">
-            <h3>確定拠出年金</h3>
+            <h3>年金</h3>
             <label>
               残高（円）
               <input id="balanceDc" type="number" min="0" step="1000" inputmode="numeric">
@@ -425,21 +426,6 @@
             <label>
               積立終了年齢
               <input id="endAgeDc" type="number" min="0" max="120" step="1" value="65" required>
-            </label>
-          </div>
-          <div class="investment-item">
-            <h3>ニッセイみらいのカタチ</h3>
-            <label>
-              残高（円）
-              <input id="balanceNissay" type="number" min="0" step="1000" inputmode="numeric">
-            </label>
-            <label>
-              積立（月額）
-              <input id="contribNissay" type="number" min="0" step="1000" inputmode="numeric">
-            </label>
-            <label>
-              積立終了年齢
-              <input id="endAgeNissay" type="number" min="0" max="120" step="1" value="65" required>
             </label>
           </div>
         </div>
@@ -492,6 +478,44 @@
                 </tr>
               </thead>
               <tbody id="bondMaturedBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="card page" data-page="insurance-detail">
+        <h2>保険料詳細</h2>
+        <div class="insurance-current">
+          <span>現在の保険積立額（月）</span>
+          <strong id="insuranceCurrentAmount">-</strong>
+        </div>
+        <p class="helper-text">
+          年齢ごとに月々の保険積立額が変わる場合は入力してください。
+        </p>
+        <div class="insurance-schedule">
+          <table>
+            <thead>
+              <tr>
+                <th>年齢</th>
+                <th>積立額（円／月）</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="insuranceScheduleBody"></tbody>
+          </table>
+        </div>
+        <button id="addInsuranceScheduleRow" type="button">変更年齢を追加</button>
+        <div class="insurance-future">
+          <h3>今後の保険積立額（変更分のみ）</h3>
+          <div class="insurance-schedule">
+            <table>
+              <thead>
+                <tr>
+                  <th>年齢</th>
+                  <th>積立額（円／月）</th>
+                </tr>
+              </thead>
+              <tbody id="insuranceFutureBody"></tbody>
             </table>
           </div>
         </div>
