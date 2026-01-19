@@ -99,6 +99,10 @@ const percentFormatter = new Intl.NumberFormat("ja-JP", {
   maximumFractionDigits: 2,
 });
 
+function isCompoundingCategory(key) {
+  return key === "funds" || key === "insurance" || key === "nissay";
+}
+
 function parseNumber(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -181,7 +185,15 @@ function simulateToAge100Detailed({
   const months = Math.max(0, monthsRemaining);
   let data = { ...categories };
   const startMonthIndex = monthIndex(startDate);
-  const investKeys = ["stocks", "funds", "bonds", "insurance", "pension", "other"];
+  const investKeys = [
+    "stocks",
+    "funds",
+    "bonds",
+    "insurance",
+    "dc",
+    "nissay",
+    "other",
+  ];
 
   for (let i = 0; i < months; i += 1) {
     const monthIndexValue = startMonthIndex + i;
@@ -195,7 +207,9 @@ function simulateToAge100Detailed({
 
     investKeys.forEach((key) => {
       const rate = categoryRates[key] ?? 0;
-      data[key] += data[key] * rate;
+      if (isCompoundingCategory(key)) {
+        data[key] += data[key] * rate;
+      }
     });
 
     data.cash += cashFlow;
@@ -274,7 +288,15 @@ function simulateAnnualSeries({
   const totalMonths = Math.max(0, monthsRemaining);
   let data = { ...categories };
   const startMonthIndex = monthIndex(startDate);
-  const investKeys = ["stocks", "funds", "bonds", "insurance", "pension", "other"];
+  const investKeys = [
+    "stocks",
+    "funds",
+    "bonds",
+    "insurance",
+    "dc",
+    "nissay",
+    "other",
+  ];
 
   for (let i = 0; i < totalMonths; i += 1) {
     const monthIndexValue = startMonthIndex + i;
@@ -288,7 +310,9 @@ function simulateAnnualSeries({
 
     investKeys.forEach((key) => {
       const rate = categoryRates?.[key] ?? monthlyRate;
-      data[key] += data[key] * rate;
+      if (isCompoundingCategory(key)) {
+        data[key] += data[key] * rate;
+      }
     });
 
     data.cash += cashFlow;
@@ -312,7 +336,8 @@ function simulateAnnualSeries({
         data.funds +
         data.bonds +
         data.insurance +
-        data.pension +
+        data.dc +
+        data.nissay +
         data.points +
         data.other;
       rows.push({
@@ -333,7 +358,8 @@ function sumCategoryTotal(data) {
     data.funds +
     data.bonds +
     data.insurance +
-    data.pension +
+    data.dc +
+    data.nissay +
     data.points +
     data.other
   );
@@ -360,7 +386,15 @@ function simulateAnnualStatements({
   const totalMonths = Math.max(0, monthsRemaining);
   let data = { ...categories };
   const startMonthIndex = monthIndex(startDate);
-  const investKeys = ["stocks", "funds", "bonds", "insurance", "pension", "other"];
+  const investKeys = [
+    "stocks",
+    "funds",
+    "bonds",
+    "insurance",
+    "dc",
+    "nissay",
+    "other",
+  ];
 
   let yearStart = { ...data };
   let yearIncome = 0;
@@ -374,7 +408,8 @@ function simulateAnnualStatements({
     funds: 0,
     bonds: 0,
     insurance: 0,
-    pension: 0,
+    dc: 0,
+    nissay: 0,
     other: 0,
   };
   let yearGainByCategory = {
@@ -382,7 +417,8 @@ function simulateAnnualStatements({
     funds: 0,
     bonds: 0,
     insurance: 0,
-    pension: 0,
+    dc: 0,
+    nissay: 0,
     other: 0,
   };
   let yearWorkMonths = 0;
@@ -408,18 +444,19 @@ function simulateAnnualStatements({
       phase = "pension";
     }
 
-    let investmentIncome = 0;
+    let monthlyInvestmentGain = 0;
     investKeys.forEach((key) => {
       const rate = categoryRates?.[key] ?? monthlyRate;
-      const gain = data[key] * rate;
-      data[key] += gain;
+      const gain = isCompoundingCategory(key) ? data[key] * rate : 0;
+      if (isCompoundingCategory(key)) {
+        data[key] += gain;
+      }
       yearGainByCategory[key] += gain;
-      investmentIncome += gain;
+      monthlyInvestmentGain += gain;
     });
-    yearInvestmentIncome += investmentIncome;
 
     data.cash += monthlyIncome - monthlyExpense;
-    yearIncome += monthlyIncome + investmentIncome;
+    yearIncome += monthlyIncome;
     yearCashIncome += monthlyIncome;
     yearExpense += monthlyExpense;
     if (phase === "work") {
@@ -443,7 +480,7 @@ function simulateAnnualStatements({
       }
     });
 
-    yearInvestmentGain += investmentIncome;
+    yearInvestmentGain += monthlyInvestmentGain;
     yearMonths += 1;
 
     const isYearEnd = monthDate.getMonth() === 11;
@@ -452,9 +489,10 @@ function simulateAnnualStatements({
       const endDate = addMonths(startDate, i + 1);
       const startTotal = sumCategoryTotal(yearStart);
       const endTotal = sumCategoryTotal(data);
-      const netChange = yearIncome - yearExpense;
+      const netCash = yearIncome - yearExpense;
+      const totalChange = netCash + yearInvestmentGain;
       const mismatch =
-        Math.round(startTotal + netChange) !== Math.round(endTotal);
+        Math.round(startTotal + totalChange) !== Math.round(endTotal);
       rows.push({
         year: monthDate.getFullYear(),
         date: endDate,
@@ -464,9 +502,9 @@ function simulateAnnualStatements({
         cashIncome: yearCashIncome,
         investmentIncome: yearInvestmentIncome,
         expense: yearExpense,
-        netCash: netChange,
+        netCash,
         investmentGain: yearInvestmentGain,
-        totalChange: endTotal - startTotal,
+        totalChange,
         months: yearMonths,
         contributions: yearContribution,
         contributionsByCategory: { ...yearContributionByCategory },
@@ -494,7 +532,8 @@ function simulateAnnualStatements({
         funds: 0,
         bonds: 0,
         insurance: 0,
-        pension: 0,
+        dc: 0,
+        nissay: 0,
         other: 0,
       };
       yearGainByCategory = {
@@ -502,7 +541,8 @@ function simulateAnnualStatements({
         funds: 0,
         bonds: 0,
         insurance: 0,
-        pension: 0,
+        dc: 0,
+        nissay: 0,
         other: 0,
       };
       yearWorkMonths = 0;
@@ -595,12 +635,12 @@ function buildContributionSchedule(birthDate) {
       endMonthIndex: toEndMonth(endAgeUsdInput),
     },
     {
-      category: "pension",
+      category: "dc",
       amount: parseNumber(contribDcInput.value) || 0,
       endMonthIndex: toEndMonth(endAgeDcInput),
     },
     {
-      category: "pension",
+      category: "nissay",
       amount: parseNumber(contribNissayInput.value) || 0,
       endMonthIndex: toEndMonth(endAgeNissayInput),
     },
@@ -619,13 +659,38 @@ function buildInitialCategories(summaryBreakdown, currentAssets) {
         summaryBreakdown.pension +
         summaryBreakdown.points +
         summaryBreakdown.other;
+    const dcInput = parseNumber(balanceDcInput.value) || 0;
+    const nissayInput = parseNumber(balanceNissayInput.value) || 0;
+    const pensionTotal = summaryBreakdown.pension || 0;
+    const pensionInputTotal = dcInput + nissayInput;
+    let dc = 0;
+    let nissay = 0;
+    if (pensionTotal > 0) {
+      if (pensionInputTotal > 0) {
+        dc = pensionTotal * (dcInput / pensionInputTotal);
+        nissay = pensionTotal * (nissayInput / pensionInputTotal);
+      } else {
+        dc = pensionTotal;
+      }
+    }
+    const cash =
+      total -
+      (summaryBreakdown.stocks +
+        summaryBreakdown.funds +
+        summaryBreakdown.bonds +
+        summaryBreakdown.insurance +
+        dc +
+        nissay +
+        summaryBreakdown.points +
+        summaryBreakdown.other);
     return {
-      cash: summaryBreakdown.cash || 0,
+      cash: cash || 0,
       stocks: summaryBreakdown.stocks || 0,
       funds: summaryBreakdown.funds || 0,
       bonds: summaryBreakdown.bonds || 0,
       insurance: summaryBreakdown.insurance || 0,
-      pension: summaryBreakdown.pension || 0,
+      dc,
+      nissay,
       points: summaryBreakdown.points || 0,
       other: summaryBreakdown.other || 0,
       total: total || 0,
@@ -636,12 +701,11 @@ function buildInitialCategories(summaryBreakdown, currentAssets) {
   const funds = parseNumber(balanceFundsInput.value) || 0;
   const bonds = parseNumber(balanceBondsInput.value) || 0;
   const insurance = parseNumber(balanceInsuranceInput.value) || 0;
-  const pension =
-    (parseNumber(balanceDcInput.value) || 0) +
-    (parseNumber(balanceNissayInput.value) || 0);
+  const dc = parseNumber(balanceDcInput.value) || 0;
+  const nissay = parseNumber(balanceNissayInput.value) || 0;
   const cash =
     (parseNumber(currentAssets) || 0) -
-    (stocks + funds + bonds + insurance + pension);
+    (stocks + funds + bonds + insurance + dc + nissay);
 
   return {
     cash,
@@ -649,7 +713,8 @@ function buildInitialCategories(summaryBreakdown, currentAssets) {
     funds,
     bonds,
     insurance,
-    pension,
+    dc,
+    nissay,
     points: 0,
     other: 0,
     total: currentAssets || 0,
@@ -740,7 +805,7 @@ function downloadCsv(rows, birthDate) {
       toCsvNumber(row.funds),
       toCsvNumber(row.bonds),
       toCsvNumber(row.insurance),
-      toCsvNumber(row.pension),
+      toCsvNumber((row.dc || 0) + (row.nissay || 0)),
       toCsvNumber(row.points),
       toCsvNumber(row.other),
     ].join(",")
@@ -1652,8 +1717,12 @@ function getSimulationContext() {
       rateInsurance === null
         ? defaultMonthlyRate
         : toMonthlyRate(rateInsurance / 100),
-    pension: defaultMonthlyRate,
-    other: defaultMonthlyRate,
+    dc: 0,
+    nissay:
+      rateInsurance === null
+        ? defaultMonthlyRate
+        : toMonthlyRate(rateInsurance / 100),
+    other: 0,
   };
   const expenseTotal = sumInputs(expenseInputs);
   const incomeTotal = sumInputs(incomeInputs);
@@ -1673,7 +1742,8 @@ function getSimulationContext() {
     funds: initial.funds,
     bonds: initial.bonds,
     insurance: initial.insurance,
-    pension: initial.pension,
+    dc: initial.dc,
+    nissay: initial.nissay,
     points: initial.points,
     other: initial.other,
   };
@@ -1807,6 +1877,14 @@ function buildBalanceSheetCsv(row, birthDate) {
   return [header, line].join("\n");
 }
 
+function gainForCategoryInBalance(row, key) {
+  return isCompoundingCategory(key) ? row.gainsByCategory[key] : 0;
+}
+
+function sumPensionFromData(data) {
+  return (data.dc || 0) + (data.nissay || 0);
+}
+
 function buildBalanceSheetCsvLine(row, birthDate) {
   const periodStartDate = getPeriodStartDate(row.date, row.months);
   const startTotalExpression = buildSignedExpression([
@@ -1815,7 +1893,8 @@ function buildBalanceSheetCsvLine(row, birthDate) {
     row.start.funds,
     row.start.bonds,
     row.start.insurance,
-    row.start.pension,
+    row.start.dc,
+    row.start.nissay,
     row.start.points,
     row.start.other,
   ]);
@@ -1829,14 +1908,19 @@ function buildBalanceSheetCsvLine(row, birthDate) {
     { amount: row.retireExpense, months: row.retireMonths },
     { amount: row.pensionExpense, months: row.pensionMonths },
   ]);
-  const incomeExpression = `${cashIncomeExpression}+${toCsvNumber(
-    row.investmentIncome
-  )}`;
+  const incomeExpression = `${cashIncomeExpression}`;
   const netExpression = `(${incomeExpression})-(${expenseExpression})`;
+  const investmentGainExpression = buildSignedExpression([
+    row.gainsByCategory.funds,
+    row.gainsByCategory.insurance,
+    row.gainsByCategory.nissay,
+  ]);
   const cashEndExpression = `${toCsvNumber(row.start.cash)}+(${cashIncomeExpression})-(${expenseExpression})-${toCsvNumber(
     row.contributions
   )}`;
-  const endTotalExpression = `${toCsvNumber(row.start.total)}+(${netExpression})`;
+  const endTotalExpression = `${toCsvNumber(
+    row.start.total
+  )}+(${netExpression})+(${investmentGainExpression})`;
   return [
     row.year,
     formatAgeYears(birthDate, periodStartDate),
@@ -1847,7 +1931,10 @@ function buildBalanceSheetCsvLine(row, birthDate) {
     csvCellWithFormula(row.start.funds, `${toCsvNumber(row.start.funds)}`),
     csvCellWithFormula(row.start.bonds, `${toCsvNumber(row.start.bonds)}`),
     csvCellWithFormula(row.start.insurance, `${toCsvNumber(row.start.insurance)}`),
-    csvCellWithFormula(row.start.pension, `${toCsvNumber(row.start.pension)}`),
+    csvCellWithFormula(
+      sumPensionFromData(row.start),
+      buildSignedExpression([row.start.dc, row.start.nissay])
+    ),
     csvCellWithFormula(row.start.points, `${toCsvNumber(row.start.points)}`),
     csvCellWithFormula(row.start.other, `${toCsvNumber(row.start.other)}`),
     csvCellWithFormula(row.end.total, endTotalExpression),
@@ -1857,7 +1944,7 @@ function buildBalanceSheetCsvLine(row, birthDate) {
       buildSignedExpression([
         row.start.stocks,
         row.contributionsByCategory.stocks,
-        row.gainsByCategory.stocks,
+        gainForCategoryInBalance(row, "stocks"),
       ])
     ),
     csvCellWithFormula(
@@ -1865,7 +1952,7 @@ function buildBalanceSheetCsvLine(row, birthDate) {
       buildSignedExpression([
         row.start.funds,
         row.contributionsByCategory.funds,
-        row.gainsByCategory.funds,
+        gainForCategoryInBalance(row, "funds"),
       ])
     ),
     csvCellWithFormula(
@@ -1873,7 +1960,7 @@ function buildBalanceSheetCsvLine(row, birthDate) {
       buildSignedExpression([
         row.start.bonds,
         row.contributionsByCategory.bonds,
-        row.gainsByCategory.bonds,
+        gainForCategoryInBalance(row, "bonds"),
       ])
     ),
     csvCellWithFormula(
@@ -1881,15 +1968,17 @@ function buildBalanceSheetCsvLine(row, birthDate) {
       buildSignedExpression([
         row.start.insurance,
         row.contributionsByCategory.insurance,
-        row.gainsByCategory.insurance,
+        gainForCategoryInBalance(row, "insurance"),
       ])
     ),
     csvCellWithFormula(
-      row.end.pension,
+      sumPensionFromData(row.end),
       buildSignedExpression([
-        row.start.pension,
-        row.contributionsByCategory.pension,
-        row.gainsByCategory.pension,
+        row.start.dc,
+        row.start.nissay,
+        row.contributionsByCategory.dc,
+        row.contributionsByCategory.nissay,
+        gainForCategoryInBalance(row, "nissay"),
       ])
     ),
     csvCellWithFormula(
@@ -1901,7 +1990,7 @@ function buildBalanceSheetCsvLine(row, birthDate) {
       buildSignedExpression([
         row.start.other,
         row.contributionsByCategory.other,
-        row.gainsByCategory.other,
+        gainForCategoryInBalance(row, "other"),
       ])
     ),
   ].join(",");
@@ -1922,7 +2011,8 @@ function buildProfitLossCsvLine(row, birthDate) {
     row.start.funds,
     row.start.bonds,
     row.start.insurance,
-    row.start.pension,
+    row.start.dc,
+    row.start.nissay,
     row.start.points,
     row.start.other,
   ]);
@@ -1945,10 +2035,14 @@ function buildProfitLossCsvLine(row, birthDate) {
     row.gainsByCategory.funds,
     row.gainsByCategory.bonds,
     row.gainsByCategory.insurance,
-    row.gainsByCategory.pension,
+    row.gainsByCategory.dc,
+    row.gainsByCategory.nissay,
     row.gainsByCategory.other,
   ]);
-  const endTotalExpression = `${toCsvNumber(row.start.total)}+(${netExpression})`;
+  const totalChangeExpression = `(${netExpression})+(${investmentGainExpression})`;
+  const endTotalExpression = `${toCsvNumber(
+    row.start.total
+  )}+(${totalChangeExpression})`;
   return [
     row.year,
     formatAgeYears(birthDate, periodStartDate),
@@ -1957,7 +2051,7 @@ function buildProfitLossCsvLine(row, birthDate) {
     csvCellWithFormula(row.expense, expenseExpression),
     csvCellWithFormula(row.netCash, netExpression),
     csvCellWithFormula(row.investmentGain, investmentGainExpression),
-    csvCellWithFormula(row.totalChange, netExpression),
+    csvCellWithFormula(row.totalChange, totalChangeExpression),
     csvCellWithFormula(row.start.total, startTotalExpression),
     csvCellWithFormula(row.end.total, endTotalExpression),
   ].join(",");
@@ -2159,7 +2253,8 @@ function render() {
             funds: initial.funds,
             bonds: initial.bonds,
             insurance: initial.insurance,
-            pension: initial.pension,
+            dc: initial.dc,
+            nissay: initial.nissay,
             points: initial.points,
             other: initial.other,
           };
