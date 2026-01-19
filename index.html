@@ -328,6 +328,10 @@
               <input id="balanceStocks" type="number" min="0" step="1000" inputmode="numeric">
             </label>
             <label>
+              手動調整（円）
+              <input id="adjustStocks" type="number" step="1000" inputmode="numeric">
+            </label>
+            <label>
               積立（月額）
               <input id="contribStocks" type="number" min="0" step="1000" inputmode="numeric">
             </label>
@@ -345,6 +349,10 @@
             <label>
               残高（円）
               <input id="balanceFunds" type="number" min="0" step="1000" inputmode="numeric">
+            </label>
+            <label>
+              手動調整（円）
+              <input id="adjustFunds" type="number" step="1000" inputmode="numeric">
             </label>
             <label>
               積立（月額）
@@ -366,6 +374,10 @@
               <input id="balanceBonds" type="number" min="0" step="1000" inputmode="numeric">
             </label>
             <label>
+              手動調整（円）
+              <input id="adjustBonds" type="number" step="1000" inputmode="numeric">
+            </label>
+            <label>
               積立（月額）
               <input id="contribBonds" type="number" min="0" step="1000" inputmode="numeric">
             </label>
@@ -383,6 +395,10 @@
             <label>
               残高（円）
               <input id="balanceInsurance" type="number" min="0" step="1000" inputmode="numeric">
+            </label>
+            <label>
+              手動調整（円）
+              <input id="adjustInsurance" type="number" step="1000" inputmode="numeric">
             </label>
             <label>
               積立（月額）
@@ -405,6 +421,10 @@
               <input id="balanceUsd" type="number" min="0" step="1000" inputmode="numeric">
             </label>
             <label>
+              手動調整（円）
+              <input id="adjustUsd" type="number" step="1000" inputmode="numeric">
+            </label>
+            <label>
               積立（月額）
               <input id="contribUsd" type="number" min="0" step="1000" inputmode="numeric">
             </label>
@@ -420,6 +440,10 @@
               <input id="balanceDc" type="number" min="0" step="1000" inputmode="numeric">
             </label>
             <label>
+              手動調整（円）
+              <input id="adjustDc" type="number" step="1000" inputmode="numeric">
+            </label>
+            <label>
               積立（月額）
               <input id="contribDc" type="number" min="0" step="1000" inputmode="numeric">
             </label>
@@ -427,6 +451,7 @@
               積立終了年齢
               <input id="endAgeDc" type="number" min="0" max="120" step="1" value="65" required>
             </label>
+            <button id="pensionDetailButton" type="button">年金詳細</button>
           </div>
         </div>
         <p class="helper-text">積立は「現金から差し引き、同額を投資残高に加算する」前提で表示します。</p>
@@ -519,6 +544,50 @@
             </table>
           </div>
         </div>
+      </section>
+
+      <section class="card page" data-page="pension-detail">
+        <h2>年金詳細</h2>
+        <div class="pension-current">
+          <span>現在の年金残高</span>
+          <strong id="pensionCurrentAmount">-</strong>
+        </div>
+        <p class="helper-text">
+          年金ごとに拠出金額（積立）と受給開始年齢を設定します。受給開始後は積み立てた年金から現金へ振替されます。
+        </p>
+        <div class="pension-plan">
+          <table>
+            <thead>
+              <tr>
+                <th>名称</th>
+                <th>受給開始年齢</th>
+                <th>拠出金額（円／月）</th>
+                <th>振替</th>
+                <th>分割金額（円／年）</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="pensionPlanBody"></tbody>
+          </table>
+        </div>
+        <button id="addPensionPlanRow" type="button">年金を追加</button>
+        <div class="pension-changes">
+          <h3>将来の拠出金額変更</h3>
+          <div class="pension-plan">
+            <table>
+              <thead>
+                <tr>
+                  <th>対象年金</th>
+                  <th>変更年齢</th>
+                  <th>変更後金額（円／月）</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="pensionChangeBody"></tbody>
+            </table>
+          </div>
+        </div>
+        <button id="addPensionChangeRow" type="button">変更を追加</button>
       </section>
     </main>
     <footer class="update-footer">

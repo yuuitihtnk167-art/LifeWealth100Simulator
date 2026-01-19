@@ -398,6 +398,77 @@ button:hover {
   color: var(--muted);
 }
 
+.pension-current {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.pension-current strong {
+  font-size: 18px;
+  color: var(--accent);
+}
+
+.pension-plan {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: auto;
+  background: #fff;
+  margin-bottom: 12px;
+}
+
+.pension-plan table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.pension-plan th,
+.pension-plan td {
+  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.pension-plan th {
+  background: #fbf8f2;
+  color: var(--muted);
+}
+
+.pension-plan input,
+.pension-plan select {
+  width: 140px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.pension-plan .pension-action button {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.pension-changes {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.pension-changes h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
 .alert-text {
   margin: 0 0 12px;
   padding: 10px 12px;

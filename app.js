@@ -50,6 +50,12 @@ const balanceBondsInput = document.getElementById("balanceBonds");
 const balanceInsuranceInput = document.getElementById("balanceInsurance");
 const balanceUsdInput = document.getElementById("balanceUsd");
 const balanceDcInput = document.getElementById("balanceDc");
+const adjustStocksInput = document.getElementById("adjustStocks");
+const adjustFundsInput = document.getElementById("adjustFunds");
+const adjustBondsInput = document.getElementById("adjustBonds");
+const adjustInsuranceInput = document.getElementById("adjustInsurance");
+const adjustUsdInput = document.getElementById("adjustUsd");
+const adjustDcInput = document.getElementById("adjustDc");
 const rateStocksInput = document.getElementById("rateStocks");
 const rateFundsInput = document.getElementById("rateFunds");
 const rateBondsInput = document.getElementById("rateBonds");
@@ -79,16 +85,25 @@ const addInsuranceScheduleRowButton = document.getElementById(
   "addInsuranceScheduleRow"
 );
 const insuranceFutureBody = document.getElementById("insuranceFutureBody");
+const pensionDetailButton = document.getElementById("pensionDetailButton");
+const pensionCurrentAmount = document.getElementById("pensionCurrentAmount");
+const pensionPlanBody = document.getElementById("pensionPlanBody");
+const addPensionPlanRowButton = document.getElementById("addPensionPlanRow");
+const pensionChangeBody = document.getElementById("pensionChangeBody");
+const addPensionChangeRowButton = document.getElementById("addPensionChangeRow");
 const tabButtons = Array.from(document.querySelectorAll(".tab-button"));
 const pages = Array.from(document.querySelectorAll(".page"));
 const resultValue = document.getElementById("resultValue");
 const resultMeta = document.getElementById("resultMeta");
 const lastUpdated = document.getElementById("lastUpdated");
 let importDirty = false;
+let lastInvestmentBalanceTotal = null;
 
 const STORAGE_KEY = "lifewealth100.inputs.v1";
 const BOND_STORAGE_KEY = "lifewealth100.bonds.v1";
 const INSURANCE_SCHEDULE_KEY = "lifewealth100.insurance.schedule.v1";
+const PENSION_PLANS_KEY = "lifewealth100.pension.plans.v1";
+const PENSION_CHANGES_KEY = "lifewealth100.pension.changes.v1";
 const persistInputs = Array.from(document.querySelectorAll("input, textarea")).filter(
   (el) =>
     el.type !== "button" &&
@@ -166,6 +181,30 @@ function writeInsuranceSchedule(rows) {
   }
 }
 
+function readPensionPlans() {
+  return safeParseJson(localStorage.getItem(PENSION_PLANS_KEY), []);
+}
+
+function writePensionPlans(rows) {
+  try {
+    localStorage.setItem(PENSION_PLANS_KEY, JSON.stringify(rows));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function readPensionChanges() {
+  return safeParseJson(localStorage.getItem(PENSION_CHANGES_KEY), []);
+}
+
+function writePensionChanges(rows) {
+  try {
+    localStorage.setItem(PENSION_CHANGES_KEY, JSON.stringify(rows));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 function parseNumber(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -177,6 +216,13 @@ function parseDate(value) {
   }
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function makeRowId() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function addYears(date, years) {
@@ -247,11 +293,13 @@ function simulateToAge100Detailed({
   bondMaturities,
   usdRate,
   insuranceContributionSchedule,
+  pensionPlanState,
 }) {
   const months = Math.max(0, monthsRemaining);
   let data = { ...categories };
   const startMonthIndex = monthIndex(startDate);
   const maturitySchedule = buildBondMaturitySchedule(bondMaturities, usdRate);
+  const planState = clonePensionPlanState(pensionPlanState);
   const investKeys = [
     "stocks",
     "funds",
@@ -298,6 +346,7 @@ function simulateToAge100Detailed({
     });
 
     applyBondMaturities(data, maturitySchedule, monthIndexValue);
+    applyPensionPlanFlow(data, monthIndexValue, planState);
   }
 
   return { months, assets: sumCategoryTotal(data) };
@@ -365,6 +414,147 @@ function getInsuranceContributionAmount(
   return target === null ? fallbackAmount : target;
 }
 
+function buildPensionPlanState(birthDate, plans, changes, initialBalance) {
+  if (!birthDate || !plans || plans.length === 0) {
+    return [];
+  }
+  const changeMap = new Map();
+  (changes || []).forEach((row) => {
+    if (!row || !row.planId) {
+      return;
+    }
+    const age = parseNumber(row.age);
+    const amount = parseNumber(row.amount);
+    if (age === null || amount === null) {
+      return;
+    }
+    const monthIndexValue = monthIndex(addYears(birthDate, age));
+    if (!changeMap.has(row.planId)) {
+      changeMap.set(row.planId, []);
+    }
+    changeMap.get(row.planId).push({ monthIndex: monthIndexValue, amount });
+  });
+
+  const planStates = plans
+    .map((plan) => {
+      if (!plan || !plan.id) {
+        return null;
+      }
+      const startAge = parseNumber(plan.startAge);
+      if (startAge === null) {
+        return null;
+      }
+      const contributionAmount = parseNumber(plan.amount) || 0;
+      const installmentAmount = parseNumber(plan.installmentAmount) || 0;
+      const payoutType = plan.payoutType === "lump" ? "lump" : "installment";
+      const changesForPlan = (changeMap.get(plan.id) || []).sort(
+        (a, b) => a.monthIndex - b.monthIndex
+      );
+      return {
+        id: plan.id,
+        name: plan.name || "",
+        startMonthIndex: monthIndex(addYears(birthDate, startAge)),
+        payoutType,
+        contributionAmount,
+        installmentAmount,
+        changes: changesForPlan,
+        balance: 0,
+        paid: false,
+      };
+    })
+    .filter(Boolean);
+
+  if (planStates.length === 0) {
+    return [];
+  }
+  const totalBase = planStates.reduce(
+    (sum, plan) => sum + Math.max(0, plan.contributionAmount),
+    0
+  );
+  if (Number.isFinite(initialBalance) && initialBalance > 0) {
+    if (totalBase > 0) {
+      planStates.forEach((plan) => {
+        plan.balance +=
+          initialBalance * (Math.max(0, plan.contributionAmount) / totalBase);
+      });
+    } else {
+      const perPlan = initialBalance / planStates.length;
+      planStates.forEach((plan) => {
+        plan.balance += perPlan;
+      });
+    }
+  }
+  return planStates;
+}
+
+function clonePensionPlanState(planState) {
+  if (!planState) {
+    return [];
+  }
+  return planState.map((plan) => ({
+    ...plan,
+    changes: Array.isArray(plan.changes) ? [...plan.changes] : [],
+  }));
+}
+
+function getPensionContributionAmount(monthIndexValue, plan) {
+  let amount = plan.contributionAmount;
+  plan.changes.forEach((change) => {
+    if (change.monthIndex <= monthIndexValue) {
+      amount = change.amount;
+    }
+  });
+  return amount;
+}
+
+function applyPensionPlanFlow(data, monthIndexValue, planState) {
+  if (!planState || planState.length === 0) {
+    return { contribution: 0, transfer: 0 };
+  }
+  let contribution = 0;
+  let transfer = 0;
+
+  planState.forEach((plan) => {
+    if (monthIndexValue < plan.startMonthIndex) {
+      const amount = getPensionContributionAmount(monthIndexValue, plan);
+      if (amount > 0) {
+        contribution += amount;
+        plan.balance += amount;
+        data.dc += amount;
+        data.cash -= amount;
+      }
+      return;
+    }
+
+    if (plan.payoutType === "lump") {
+      if (!plan.paid) {
+        const transferable = Math.min(plan.balance, data.dc);
+        if (transferable > 0) {
+          data.dc -= transferable;
+          data.cash += transferable;
+          transfer += transferable;
+          plan.balance -= transferable;
+        }
+        plan.paid = true;
+      }
+      return;
+    }
+
+    if ((monthIndexValue - plan.startMonthIndex) % 12 === 0) {
+      const amount = plan.installmentAmount || 0;
+      const transferable = Math.min(plan.balance, amount, data.dc);
+      if (transferable > 0) {
+        data.dc -= transferable;
+        data.cash += transferable;
+        transfer += transferable;
+        plan.balance -= transferable;
+      }
+    }
+  });
+
+  return { contribution, transfer };
+}
+
 function buildBondMaturitySchedule(bondMaturities, usdRate) {
   const schedule = new Map();
   if (!bondMaturities || bondMaturities.length === 0) {
@@ -398,6 +588,7 @@ function applyBondMaturities(data, schedule, monthIndexValue) {
   data.cash += transferable;
   return transferable;
 }
+
 
 
 function findNegativeCashMonth({
@@ -451,6 +642,7 @@ function simulateAnnualSeries({
   bondMaturities,
   usdRate,
   insuranceContributionSchedule,
+  pensionPlanState,
 }) {
   const monthlyRate = Math.pow(1 + annualRate, 1 / 12) - 1;
   const rows = [];
@@ -458,6 +650,7 @@ function simulateAnnualSeries({
   let data = { ...categories };
   const startMonthIndex = monthIndex(startDate);
   const maturitySchedule = buildBondMaturitySchedule(bondMaturities, usdRate);
+  const planState = clonePensionPlanState(pensionPlanState);
   const investKeys = [
     "stocks",
     "funds",
@@ -504,6 +697,7 @@ function simulateAnnualSeries({
     });
 
     applyBondMaturities(data, maturitySchedule, monthIndexValue);
+    applyPensionPlanFlow(data, monthIndexValue, planState);
 
     const isYearEnd = (i + 1) % 12 === 0;
     const isFinal = i === totalMonths - 1;
@@ -560,6 +754,7 @@ function simulateAnnualStatements({
   bondMaturities,
   usdRate,
   insuranceContributionSchedule,
+  pensionPlanState,
 }) {
   const monthlyRate = Math.pow(1 + annualRate, 1 / 12) - 1;
   const rows = [];
@@ -567,6 +762,7 @@ function simulateAnnualStatements({
   let data = { ...categories };
   const startMonthIndex = monthIndex(startDate);
   const maturitySchedule = buildBondMaturitySchedule(bondMaturities, usdRate);
+  const planState = clonePensionPlanState(pensionPlanState);
   const investKeys = [
     "stocks",
     "funds",
@@ -584,6 +780,7 @@ function simulateAnnualStatements({
   let yearInvestmentGain = 0;
   let yearContribution = 0;
   let yearBondMaturity = 0;
+  let yearPensionTransfer = 0;
   let yearContributionByCategory = {
     stocks: 0,
     funds: 0,
@@ -672,6 +869,16 @@ function simulateAnnualStatements({
       maturitySchedule,
       monthIndexValue
     );
+    const pensionFlow = applyPensionPlanFlow(
+      data,
+      monthIndexValue,
+      planState
+    );
+    if (pensionFlow.contribution) {
+      yearContribution += pensionFlow.contribution;
+      yearContributionByCategory.dc += pensionFlow.contribution;
+    }
+    yearPensionTransfer += pensionFlow.transfer;
     yearInvestmentGain += monthlyInvestmentGain;
     yearMonths += 1;
 
@@ -698,6 +905,7 @@ function simulateAnnualStatements({
         investmentGain: yearInvestmentGain,
         totalChange,
         bondMaturity: yearBondMaturity,
+        pensionTransfer: yearPensionTransfer,
         months: yearMonths,
         contributions: yearContribution,
         contributionsByCategory: { ...yearContributionByCategory },
@@ -720,6 +928,7 @@ function simulateAnnualStatements({
       yearExpense = 0;
       yearInvestmentGain = 0;
       yearBondMaturity = 0;
+      yearPensionTransfer = 0;
       yearContribution = 0;
       yearContributionByCategory = {
         stocks: 0,
@@ -793,14 +1002,15 @@ function getSummaryBreakdown(text) {
   };
 }
 
-function buildContributionSchedule(birthDate) {
+function buildContributionSchedule(birthDate, options = {}) {
   if (!birthDate) {
     return [];
   }
+  const skipDc = options.skipDc === true;
   const toEndMonth = (input) =>
     monthIndex(addYears(birthDate, parseNumber(input.value) || 0));
 
-  return [
+  const schedule = [
     {
       category: "stocks",
       amount: parseNumber(contribStocksInput.value) || 0,
@@ -826,58 +1036,144 @@ function buildContributionSchedule(birthDate) {
       amount: parseNumber(contribUsdInput.value) || 0,
       endMonthIndex: toEndMonth(endAgeUsdInput),
     },
-    {
+  ];
+  if (!skipDc) {
+    schedule.push({
       category: "dc",
       amount: parseNumber(contribDcInput.value) || 0,
       endMonthIndex: toEndMonth(endAgeDcInput),
-    },
-  ];
+    });
+  }
+  return schedule;
+}
+
+function getInvestmentBalanceTotal() {
+  return (
+    (parseNumber(balanceStocksInput.value) || 0) +
+    (parseNumber(adjustStocksInput?.value) || 0) +
+    (parseNumber(balanceFundsInput.value) || 0) +
+    (parseNumber(adjustFundsInput?.value) || 0) +
+    (parseNumber(balanceBondsInput.value) || 0) +
+    (parseNumber(adjustBondsInput?.value) || 0) +
+    (parseNumber(balanceInsuranceInput.value) || 0) +
+    (parseNumber(adjustInsuranceInput?.value) || 0) +
+    (parseNumber(balanceUsdInput.value) || 0) +
+    (parseNumber(adjustUsdInput?.value) || 0) +
+    (parseNumber(balanceDcInput.value) || 0) +
+    (parseNumber(adjustDcInput?.value) || 0)
+  );
+}
+
+function getInvestmentAdjustments() {
+  return {
+    stocks: parseNumber(adjustStocksInput?.value) || 0,
+    funds: parseNumber(adjustFundsInput?.value) || 0,
+    bonds: parseNumber(adjustBondsInput?.value) || 0,
+    insurance: parseNumber(adjustInsuranceInput?.value) || 0,
+    usd: parseNumber(adjustUsdInput?.value) || 0,
+    dc: parseNumber(adjustDcInput?.value) || 0,
+  };
+}
+
+function getAdjustedBalance(value, adjustment) {
+  return (value || 0) + (adjustment || 0);
+}
+
+function updateCurrentAssetsFromInvestmentBalances() {
+  if (!currentAssetsInput) {
+    return;
+  }
+  const investmentTotal = getInvestmentBalanceTotal();
+  const currentTotal = parseNumber(currentAssetsInput.value);
+  const previousInvestmentTotal = lastInvestmentBalanceTotal;
+  if (
+    Number.isFinite(currentTotal) &&
+    Number.isFinite(previousInvestmentTotal)
+  ) {
+    const cashBaseline = currentTotal - previousInvestmentTotal;
+    currentAssetsInput.value = Math.round(investmentTotal + cashBaseline);
+    lastInvestmentBalanceTotal = investmentTotal;
+    render();
+    return;
+  }
+  currentAssetsInput.value = Math.round(investmentTotal);
+  lastInvestmentBalanceTotal = investmentTotal;
+  render();
 }
 
 function buildInitialCategories(summaryBreakdown, currentAssets) {
+  const adjustments = getInvestmentAdjustments();
   if (summaryBreakdown) {
     const total =
-      summaryBreakdown.total ||
-      summaryBreakdown.cash +
-        summaryBreakdown.stocks +
-        summaryBreakdown.funds +
-        summaryBreakdown.bonds +
-        summaryBreakdown.insurance +
-        summaryBreakdown.pension +
-        summaryBreakdown.points +
-        summaryBreakdown.other;
+      Number.isFinite(currentAssets) ?
+        currentAssets :
+        summaryBreakdown.total ||
+          summaryBreakdown.cash +
+            summaryBreakdown.stocks +
+            summaryBreakdown.funds +
+            summaryBreakdown.bonds +
+            summaryBreakdown.insurance +
+            summaryBreakdown.pension +
+            summaryBreakdown.points +
+            summaryBreakdown.other;
     const pensionTotal = summaryBreakdown.pension || 0;
-    const dc = pensionTotal > 0 ? pensionTotal : 0;
+    const dc = getAdjustedBalance(pensionTotal, adjustments.dc);
+    const usdBalance = getAdjustedBalance(
+      parseNumber(balanceUsdInput.value),
+      adjustments.usd
+    );
+    const stocks = getAdjustedBalance(summaryBreakdown.stocks, adjustments.stocks);
+    const funds = getAdjustedBalance(summaryBreakdown.funds, adjustments.funds);
+    const bonds = getAdjustedBalance(summaryBreakdown.bonds, adjustments.bonds);
+    const insurance = getAdjustedBalance(
+      summaryBreakdown.insurance,
+      adjustments.insurance
+    );
+    const points = summaryBreakdown.points || 0;
+    const other = (summaryBreakdown.other || 0) + usdBalance;
     const cash =
       total -
-      (summaryBreakdown.stocks +
-        summaryBreakdown.funds +
-        summaryBreakdown.bonds +
-        summaryBreakdown.insurance +
-        dc +
-        summaryBreakdown.points +
-        summaryBreakdown.other);
+      (stocks + funds + bonds + insurance + dc + points + other);
     return {
       cash: cash || 0,
-      stocks: summaryBreakdown.stocks || 0,
-      funds: summaryBreakdown.funds || 0,
-      bonds: summaryBreakdown.bonds || 0,
-      insurance: summaryBreakdown.insurance || 0,
+      stocks,
+      funds,
+      bonds,
+      insurance,
       dc,
-      points: summaryBreakdown.points || 0,
-      other: summaryBreakdown.other || 0,
+      points,
+      other,
       total: total || 0,
     };
   }
 
-  const stocks = parseNumber(balanceStocksInput.value) || 0;
-  const funds = parseNumber(balanceFundsInput.value) || 0;
-  const bonds = parseNumber(balanceBondsInput.value) || 0;
-  const insurance = parseNumber(balanceInsuranceInput.value) || 0;
-  const dc = parseNumber(balanceDcInput.value) || 0;
+  const stocks = getAdjustedBalance(
+    parseNumber(balanceStocksInput.value),
+    adjustments.stocks
+  );
+  const funds = getAdjustedBalance(
+    parseNumber(balanceFundsInput.value),
+    adjustments.funds
+  );
+  const bonds = getAdjustedBalance(
+    parseNumber(balanceBondsInput.value),
+    adjustments.bonds
+  );
+  const insurance = getAdjustedBalance(
+    parseNumber(balanceInsuranceInput.value),
+    adjustments.insurance
+  );
+  const dc = getAdjustedBalance(
+    parseNumber(balanceDcInput.value),
+    adjustments.dc
+  );
+  const usd = getAdjustedBalance(
+    parseNumber(balanceUsdInput.value),
+    adjustments.usd
+  );
   const cash =
     (parseNumber(currentAssets) || 0) -
-    (stocks + funds + bonds + insurance + dc);
+    (stocks + funds + bonds + insurance + dc + usd);
 
   return {
     cash,
@@ -887,7 +1183,7 @@ function buildInitialCategories(summaryBreakdown, currentAssets) {
     insurance,
     dc,
     points: 0,
-    other: 0,
+    other: usd,
     total: currentAssets || 0,
   };
 }
@@ -1074,6 +1370,10 @@ function sumInvestmentsFromList(text) {
       return;
     }
 
+    if (/代表口座-米ドル普通\s*住信SBIネット銀行/.test(name)) {
+      totals.usd += amount;
+      return;
+    }
     if (/株式/.test(type)) {
       totals.stocks += amount;
       return;
@@ -1165,6 +1465,11 @@ function sumInvestmentsFromText(text) {
       return;
     }
 
+    if (/代表口座-米ドル普通\s*住信SBIネット銀行/.test(line)) {
+      totals.usd += amount;
+      matched = true;
+      return;
+    }
     if (/米ドル|USD|ドル/.test(line)) {
       totals.usd += amount;
       matched = true;
@@ -1572,6 +1877,260 @@ function updateInsuranceDetailSummary() {
   });
 }
 
+function createPensionPlanRow(data = {}) {
+  if (!pensionPlanBody) {
+    return;
+  }
+  const row = document.createElement("tr");
+  row.dataset.id = data.id || makeRowId();
+
+  const nameInput = document.createElement("input");
+  nameInput.type = "text";
+  nameInput.placeholder = "例: 企業年金";
+  nameInput.dataset.key = "name";
+  nameInput.value = data.name ?? "";
+
+  const startAgeInput = document.createElement("input");
+  startAgeInput.type = "number";
+  startAgeInput.min = "0";
+  startAgeInput.max = "120";
+  startAgeInput.step = "1";
+  startAgeInput.inputMode = "numeric";
+  startAgeInput.dataset.key = "startAge";
+  startAgeInput.value = data.startAge ?? "";
+
+  const amountInput = document.createElement("input");
+  amountInput.type = "number";
+  amountInput.min = "0";
+  amountInput.step = "1000";
+  amountInput.inputMode = "numeric";
+  amountInput.dataset.key = "amount";
+  amountInput.value = data.amount ?? "";
+
+  const payoutSelect = document.createElement("select");
+  payoutSelect.dataset.key = "payoutType";
+  [
+    { value: "lump", label: "一括" },
+    { value: "installment", label: "分割" },
+  ].forEach((item) => {
+    const option = document.createElement("option");
+    option.value = item.value;
+    option.textContent = item.label;
+    payoutSelect.appendChild(option);
+  });
+  payoutSelect.value = data.payoutType ?? "installment";
+
+  const installmentInput = document.createElement("input");
+  installmentInput.type = "number";
+  installmentInput.min = "0";
+  installmentInput.step = "1000";
+  installmentInput.inputMode = "numeric";
+  installmentInput.dataset.key = "installmentAmount";
+  installmentInput.value = data.installmentAmount ?? "";
+
+  const removeButton = document.createElement("button");
+  removeButton.type = "button";
+  removeButton.textContent = "削除";
+  removeButton.addEventListener("click", () => {
+    row.remove();
+    persistPensionPlanRows();
+  });
+
+  const cells = [
+    nameInput,
+    startAgeInput,
+    amountInput,
+    payoutSelect,
+    installmentInput,
+  ].map((input) => {
+    const td = document.createElement("td");
+    td.appendChild(input);
+    return td;
+  });
+  const actionCell = document.createElement("td");
+  actionCell.className = "pension-action";
+  actionCell.appendChild(removeButton);
+  cells.push(actionCell);
+
+  cells.forEach((cell) => row.appendChild(cell));
+  pensionPlanBody.appendChild(row);
+
+  [nameInput, startAgeInput, amountInput, payoutSelect, installmentInput].forEach(
+    (input) => {
+      input.addEventListener("input", persistPensionPlanRows);
+      input.addEventListener("change", persistPensionPlanRows);
+    }
+  );
+}
+
+function serializePensionPlanRow(row) {
+  const data = { id: row.dataset.id || makeRowId() };
+  row.querySelectorAll("input, select").forEach((input) => {
+    data[input.dataset.key] = input.value;
+  });
+  return data;
+}
+
+function persistPensionPlanRows() {
+  if (!pensionPlanBody) {
+    return;
+  }
+  const rows = Array.from(pensionPlanBody.querySelectorAll("tr")).map((row) =>
+    serializePensionPlanRow(row)
+  );
+  writePensionPlans(rows);
+  refreshPensionChangePlanOptions();
+  render();
+}
+
+function loadPensionPlanRows() {
+  if (!pensionPlanBody) {
+    return;
+  }
+  pensionPlanBody.innerHTML = "";
+  const rows = readPensionPlans();
+  if (!rows.length) {
+    createPensionPlanRow();
+  } else {
+    rows.forEach((row) => createPensionPlanRow(row));
+  }
+  refreshPensionChangePlanOptions();
+}
+
+function createPensionChangeRow(data = {}) {
+  if (!pensionChangeBody) {
+    return;
+  }
+  const row = document.createElement("tr");
+  row.dataset.id = data.id || makeRowId();
+
+  const planSelect = document.createElement("select");
+  planSelect.dataset.key = "planId";
+  planSelect.value = data.planId ?? "";
+
+  const ageInput = document.createElement("input");
+  ageInput.type = "number";
+  ageInput.min = "0";
+  ageInput.max = "120";
+  ageInput.step = "1";
+  ageInput.inputMode = "numeric";
+  ageInput.dataset.key = "age";
+  ageInput.value = data.age ?? "";
+
+  const amountInput = document.createElement("input");
+  amountInput.type = "number";
+  amountInput.min = "0";
+  amountInput.step = "1000";
+  amountInput.inputMode = "numeric";
+  amountInput.dataset.key = "amount";
+  amountInput.value = data.amount ?? "";
+
+  const removeButton = document.createElement("button");
+  removeButton.type = "button";
+  removeButton.textContent = "削除";
+  removeButton.addEventListener("click", () => {
+    row.remove();
+    persistPensionChangeRows();
+  });
+
+  const cells = [planSelect, ageInput, amountInput].map((input) => {
+    const td = document.createElement("td");
+    td.appendChild(input);
+    return td;
+  });
+  const actionCell = document.createElement("td");
+  actionCell.className = "pension-action";
+  actionCell.appendChild(removeButton);
+  cells.push(actionCell);
+
+  cells.forEach((cell) => row.appendChild(cell));
+  pensionChangeBody.appendChild(row);
+
+  [planSelect, ageInput, amountInput].forEach((input) => {
+    input.addEventListener("input", persistPensionChangeRows);
+    input.addEventListener("change", persistPensionChangeRows);
+  });
+
+  refreshPensionChangePlanOptions();
+}
+
+function serializePensionChangeRow(row) {
+  const data = { id: row.dataset.id || makeRowId() };
+  row.querySelectorAll("input, select").forEach((input) => {
+    data[input.dataset.key] = input.value;
+  });
+  return data;
+}
+
+function persistPensionChangeRows() {
+  if (!pensionChangeBody) {
+    return;
+  }
+  const rows = Array.from(pensionChangeBody.querySelectorAll("tr")).map((row) =>
+    serializePensionChangeRow(row)
+  );
+  writePensionChanges(rows);
+  render();
+}
+
+function loadPensionChangeRows() {
+  if (!pensionChangeBody) {
+    return;
+  }
+  pensionChangeBody.innerHTML = "";
+  const rows = readPensionChanges();
+  if (!rows.length) {
+    createPensionChangeRow();
+  } else {
+    rows.forEach((row) => createPensionChangeRow(row));
+  }
+}
+
+function refreshPensionChangePlanOptions() {
+  if (!pensionChangeBody) {
+    return;
+  }
+  const plans = readPensionPlans();
+  const options = plans.map((plan) => ({
+    id: plan.id,
+    name: plan.name || "名称未入力",
+  }));
+  pensionChangeBody.querySelectorAll("select[data-key=\"planId\"]").forEach(
+    (select) => {
+      const current = select.value;
+      select.innerHTML = "";
+      if (!options.length) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "年金がありません";
+        select.appendChild(option);
+        select.disabled = true;
+      } else {
+        options.forEach((item) => {
+          const option = document.createElement("option");
+          option.value = item.id;
+          option.textContent = item.name;
+          select.appendChild(option);
+        });
+        select.disabled = false;
+        if (options.some((item) => item.id === current)) {
+          select.value = current;
+        }
+      }
+    }
+  );
+}
+
+function updatePensionDetailSummary() {
+  if (!pensionCurrentAmount) {
+    return;
+  }
+  const currentAmount = parseNumber(balanceDcInput.value);
+  pensionCurrentAmount.textContent = Number.isFinite(currentAmount)
+    ? yenFormatter.format(currentAmount)
+    : "-";
+}
+
 function persistBondRows() {
   if (!bondTableBody) {
     return;
@@ -1727,13 +2286,22 @@ function isPlainObject(value) {
 function buildSyncPayload() {
   persistInputsToStorage();
   persistBondRows();
+  persistInsuranceScheduleRows();
+  persistPensionPlanRows();
+  persistPensionChangeRows();
   const inputs = safeParseJson(localStorage.getItem(STORAGE_KEY), {});
   const bonds = readBondStorage();
+  const insuranceSchedule = readInsuranceSchedule();
+  const pensionPlans = readPensionPlans();
+  const pensionChanges = readPensionChanges();
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
     inputs,
     bonds,
+    insuranceSchedule,
+    pensionPlans,
+    pensionChanges,
   };
 }
 
@@ -1782,7 +2350,16 @@ function importSyncPayload(raw) {
   }
   const inputs = isPlainObject(data.inputs) ? data.inputs : null;
   const bonds = data.bonds ? normalizeBondStorage(data.bonds) : null;
-  if (!inputs && !bonds) {
+  const insuranceSchedule = Array.isArray(data.insuranceSchedule)
+    ? data.insuranceSchedule
+    : null;
+  const pensionPlans = Array.isArray(data.pensionPlans)
+    ? data.pensionPlans
+    : null;
+  const pensionChanges = Array.isArray(data.pensionChanges)
+    ? data.pensionChanges
+    : null;
+  if (!inputs && !bonds && !insuranceSchedule && !pensionPlans && !pensionChanges) {
     window.alert("同期データに読み込める内容がありません。");
     return false;
   }
@@ -1793,12 +2370,24 @@ function importSyncPayload(raw) {
     if (bonds) {
       writeBondStorage(bonds);
     }
+    if (insuranceSchedule) {
+      writeInsuranceSchedule(insuranceSchedule);
+    }
+    if (pensionPlans) {
+      writePensionPlans(pensionPlans);
+    }
+    if (pensionChanges) {
+      writePensionChanges(pensionChanges);
+    }
   } catch {
     window.alert("同期データの保存に失敗しました。");
     return false;
   }
   loadPersistedInputs();
   loadBondRows();
+  loadInsuranceScheduleRows();
+  loadPensionPlanRows();
+  loadPensionChangeRows();
   render();
   if (syncStatus) {
     syncStatus.textContent = "インポート済み";
@@ -2042,11 +2631,12 @@ function handleExportCsv() {
       context.pensionIncomeTotal +
       context.ongoingIncome -
       context.retireExpenseTotal,
-    contributionSchedule: buildContributionSchedule(context.birthDate),
+    contributionSchedule: context.contributionSchedule,
     categories: context.categories,
     bondMaturities: context.bondMaturities,
     usdRate: context.usdRate,
     insuranceContributionSchedule: context.insuranceContributionSchedule,
+    pensionPlanState: context.pensionPlanState,
   });
 
   if (!rows.length) {
@@ -2112,6 +2702,11 @@ function getSimulationContext() {
     birthDate,
     readInsuranceSchedule()
   );
+  const pensionPlans = readPensionPlans();
+  const hasPensionPlans = pensionPlans.length > 0;
+  const contributionSchedule = buildContributionSchedule(birthDate, {
+    skipDc: hasPensionPlans,
+  });
   const expenseTotal = sumInputs(expenseInputs);
   const incomeTotal = sumInputs(incomeInputs);
   const retireExpenseTotal = sumInputs(retireExpenseInputs);
@@ -2134,6 +2729,12 @@ function getSimulationContext() {
     points: initial.points,
     other: initial.other,
   };
+  const pensionPlanState = buildPensionPlanState(
+    birthDate,
+    pensionPlans,
+    [],
+    categories.dc
+  );
 
   return {
     birthDate,
@@ -2154,10 +2755,12 @@ function getSimulationContext() {
     retireBaseIncome,
     pensionIncomeTotal,
     ongoingIncome,
+    contributionSchedule,
     categories,
     bondMaturities,
     usdRate,
     insuranceContributionSchedule,
+    pensionPlanState,
   };
 }
 
@@ -2183,11 +2786,12 @@ function buildStatementRows({ showAlert }) {
     retireExpense: context.retireExpenseTotal,
     pensionIncome: context.pensionIncomeTotal + context.ongoingIncome,
     pensionExpense: context.retireExpenseTotal,
-    contributionSchedule: buildContributionSchedule(context.birthDate),
+    contributionSchedule: context.contributionSchedule,
     categories: context.categories,
     bondMaturities: context.bondMaturities,
     usdRate: context.usdRate,
     insuranceContributionSchedule: context.insuranceContributionSchedule,
+    pensionPlanState: context.pensionPlanState,
   });
 
   if (!rows.length) {
@@ -2326,9 +2930,10 @@ function buildBalanceSheetCsvLine(row, birthDate) {
     row.gainsByCategory.insurance,
   ]);
   const bondMaturityExpression = toCsvNumber(row.bondMaturity || 0);
+  const pensionTransferExpression = toCsvNumber(row.pensionTransfer || 0);
   const cashEndExpression = `${toCsvNumber(row.start.cash)}+(${cashIncomeExpression})-(${expenseExpression})-${toCsvNumber(
     row.contributions
-  )}+${bondMaturityExpression}`;
+  )}+${bondMaturityExpression}+${pensionTransferExpression}`;
   const endTotalExpression = `${toCsvNumber(
     row.start.total
   )}+(${netExpression})+(${investmentGainExpression})`;
@@ -2388,6 +2993,7 @@ function buildBalanceSheetCsvLine(row, birthDate) {
       buildSignedExpression([
         row.start.dc,
         row.contributionsByCategory.dc,
+        -pensionTransferExpression,
         gainForCategoryInBalance(row, "dc"),
       ])
     ),
@@ -2582,14 +3188,15 @@ function render() {
   const pensionIncomeTotal = sumInputs(pensionIncomeInputs);
   const ongoingIncome = (incomeMap.dividend || 0) + (incomeMap.other || 0);
   const retireIncomeTotal = retireBaseIncome;
-  const contributionSchedule = buildContributionSchedule(birthDate);
-  const investmentBalanceTotal =
-    (parseNumber(balanceStocksInput.value) || 0) +
-    (parseNumber(balanceFundsInput.value) || 0) +
-    (parseNumber(balanceBondsInput.value) || 0) +
-    (parseNumber(balanceInsuranceInput.value) || 0) +
-    (parseNumber(balanceUsdInput.value) || 0) +
-    (parseNumber(balanceDcInput.value) || 0);
+  const pensionPlans = readPensionPlans();
+  const hasPensionPlans = pensionPlans.length > 0;
+  const contributionSchedule = buildContributionSchedule(birthDate, {
+    skipDc: hasPensionPlans,
+  });
+  const investmentBalanceTotal = getInvestmentBalanceTotal();
+  if (!Number.isFinite(lastInvestmentBalanceTotal)) {
+    lastInvestmentBalanceTotal = investmentBalanceTotal;
+  }
   const investmentContributionTotal =
     (parseNumber(contribStocksInput.value) || 0) +
     (parseNumber(contribFundsInput.value) || 0) +
@@ -2677,6 +3284,7 @@ function render() {
             usdRate: getSimulationContext()?.usdRate,
             insuranceContributionSchedule:
               getSimulationContext()?.insuranceContributionSchedule,
+            pensionPlanState: getSimulationContext()?.pensionPlanState,
           });
           negativeRow = rows.find((row) => row.cash < 0);
         }
@@ -2749,6 +3357,7 @@ function render() {
         bondMaturities: context.bondMaturities,
         usdRate: context.usdRate,
         insuranceContributionSchedule: context.insuranceContributionSchedule,
+        pensionPlanState: context.pensionPlanState,
       })
     : simulateToAge100({
         currentAssets,
@@ -2797,6 +3406,7 @@ function render() {
 
   updateStatementYearOptions(buildStatementRows({ showAlert: false }));
   updateInsuranceDetailSummary();
+  updatePensionDetailSummary();
 }
 
 [
@@ -2815,6 +3425,12 @@ function render() {
   balanceInsuranceInput,
   balanceUsdInput,
   balanceDcInput,
+  adjustStocksInput,
+  adjustFundsInput,
+  adjustBondsInput,
+  adjustInsuranceInput,
+  adjustUsdInput,
+  adjustDcInput,
   rateStocksInput,
   rateFundsInput,
   rateBondsInput,
@@ -2834,6 +3450,23 @@ function render() {
 ].forEach((input) => {
   input.addEventListener("input", render);
   input.addEventListener("input", persistInputsToStorage);
+});
+
+[
+  balanceStocksInput,
+  balanceFundsInput,
+  balanceBondsInput,
+  balanceInsuranceInput,
+  balanceUsdInput,
+  balanceDcInput,
+  adjustStocksInput,
+  adjustFundsInput,
+  adjustBondsInput,
+  adjustInsuranceInput,
+  adjustUsdInput,
+  adjustDcInput,
+].forEach((input) => {
+  input.addEventListener("input", updateCurrentAssetsFromInvestmentBalances);
 });
 
 importButton.addEventListener("click", applyImportedData);
@@ -2925,6 +3558,23 @@ if (addInsuranceScheduleRowButton) {
     persistInsuranceScheduleRows();
   });
 }
+if (pensionDetailButton) {
+  pensionDetailButton.addEventListener("click", () => {
+    setActivePage("pension-detail");
+  });
+}
+if (addPensionPlanRowButton) {
+  addPensionPlanRowButton.addEventListener("click", () => {
+    createPensionPlanRow();
+    persistPensionPlanRows();
+  });
+}
+if (addPensionChangeRowButton) {
+  addPensionChangeRowButton.addEventListener("click", () => {
+    createPensionChangeRow();
+    persistPensionChangeRows();
+  });
+}
 assetDataInput.addEventListener("input", markImportDirty);
 summaryDataInput.addEventListener("input", markImportDirty);
 
@@ -2935,6 +3585,8 @@ persistInputs.forEach((input) => {
 loadPersistedInputs();
 loadBondRows();
 loadInsuranceScheduleRows();
+loadPensionPlanRows();
+loadPensionChangeRows();
 render();
 
 function setActivePage(pageId) {
