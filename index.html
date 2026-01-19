@@ -67,15 +67,11 @@
           <textarea id="summaryData" rows="4" placeholder="日付\t合計（円）\t..."></textarea>
         </label>
         <div class="sync-panel">
-          <h3>入力データのエクスポート / インポート</h3>
-          <p class="helper-text">PCでエクスポートしてスマホでインポートすると同期できます。</p>
-          <label>
-            同期データ（JSON）
-            <textarea id="syncData" rows="6" data-no-persist="true" placeholder="ここに貼り付け"></textarea>
-          </label>
+          <h3>入力データのバックアップ</h3>
+          <p class="helper-text">PCのフォルダーに保存/復元します。</p>
           <div class="sync-actions">
-            <button id="exportSync" type="button">入力データをエクスポート</button>
-            <button id="importSync" type="button">入力データをインポート</button>
+            <button id="exportSyncFolder" type="button">フォルダーにバックアップ</button>
+            <button id="importSyncFolder" type="button">フォルダーから復元</button>
           </div>
           <p class="sync-status" id="syncStatus">-</p>
         </div>

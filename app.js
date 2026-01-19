@@ -18,9 +18,8 @@ const bondTableBody = document.getElementById("bondTableBody");
 const addBondRowButton = document.getElementById("addBondRow");
 const bondAverageRate = document.getElementById("bondAverageRate");
 const importStatus = document.getElementById("importStatus");
-const syncDataInput = document.getElementById("syncData");
-const exportSyncButton = document.getElementById("exportSync");
-const importSyncButton = document.getElementById("importSync");
+const exportSyncFolderButton = document.getElementById("exportSyncFolder");
+const importSyncFolderButton = document.getElementById("importSyncFolder");
 const syncStatus = document.getElementById("syncStatus");
 const expenseInputs = Array.from(document.querySelectorAll(".expense-input"));
 const monthlyExpense = document.getElementById("monthlyExpense");
@@ -1257,42 +1256,77 @@ function buildSyncPayload() {
   };
 }
 
-function handleExportSync() {
-  if (!syncDataInput) {
+async function handleExportSyncFolder() {
+  if (!window.showDirectoryPicker) {
+    window.alert("このブラウザはフォルダー選択に対応していません。");
     return;
   }
-  const payload = buildSyncPayload();
-  syncDataInput.value = JSON.stringify(payload, null, 2);
-  if (syncStatus) {
-    syncStatus.textContent = "エクスポート済み";
+  try {
+    const dirHandle = await window.showDirectoryPicker();
+    const fileHandle = await dirHandle.getFileHandle("LifeWealth100_sync.json", {
+      create: true,
+    });
+    const writable = await fileHandle.createWritable();
+    const payload = buildSyncPayload();
+    const json = JSON.stringify(payload, null, 2);
+    await writable.write(json);
+    await writable.close();
+    if (syncStatus) {
+      syncStatus.textContent = "フォルダーに保存しました";
+    }
+  } catch (error) {
+    if (error && error.name === "AbortError") {
+      return;
+    }
+    window.alert("フォルダーへの保存に失敗しました。");
   }
 }
 
-function handleImportSync() {
-  if (!syncDataInput) {
+async function handleImportSyncFolder() {
+  if (!window.showDirectoryPicker) {
+    window.alert("このブラウザはフォルダー選択に対応していません。");
     return;
   }
-  const raw = syncDataInput.value.trim();
-  if (!raw) {
+  try {
+    const dirHandle = await window.showDirectoryPicker();
+    const fileHandle = await dirHandle.getFileHandle("LifeWealth100_sync.json");
+    const file = await fileHandle.getFile();
+    const text = await file.text();
+    importSyncPayload(text);
+  } catch (error) {
+    if (error && error.name === "AbortError") {
+      return;
+    }
+    if (error && error.name === "NotFoundError") {
+      window.alert("フォルダー内に LifeWealth100_sync.json がありません。");
+      return;
+    }
+    window.alert("フォルダーからの復元に失敗しました。");
+  }
+}
+
+function importSyncPayload(raw) {
+  const trimmed = raw.trim();
+  if (!trimmed) {
     window.alert("同期データが空です。");
-    return;
+    return false;
   }
   let data;
   try {
-    data = JSON.parse(raw);
+    data = JSON.parse(trimmed);
   } catch {
     window.alert("同期データのJSONが正しくありません。");
-    return;
+    return false;
   }
   if (!isPlainObject(data)) {
     window.alert("同期データの形式が正しくありません。");
-    return;
+    return false;
   }
   const inputs = isPlainObject(data.inputs) ? data.inputs : null;
   const bonds = Array.isArray(data.bonds) ? data.bonds : null;
   if (!inputs && !bonds) {
     window.alert("同期データに読み込める内容がありません。");
-    return;
+    return false;
   }
   try {
     if (inputs) {
@@ -1303,7 +1337,7 @@ function handleImportSync() {
     }
   } catch {
     window.alert("同期データの保存に失敗しました。");
-    return;
+    return false;
   }
   loadPersistedInputs();
   loadBondRows();
@@ -1311,6 +1345,7 @@ function handleImportSync() {
   if (syncStatus) {
     syncStatus.textContent = "インポート済み";
   }
+  return true;
 }
 
 function extractSectionTotals(text) {
@@ -2306,11 +2341,15 @@ if (exportProfitLossDecadeButton) {
     handleExportProfitLossDecade
   );
 }
-if (exportSyncButton) {
-  exportSyncButton.addEventListener("click", handleExportSync);
+if (exportSyncFolderButton) {
+  exportSyncFolderButton.addEventListener("click", () => {
+    handleExportSyncFolder();
+  });
 }
-if (importSyncButton) {
-  importSyncButton.addEventListener("click", handleImportSync);
+if (importSyncFolderButton) {
+  importSyncFolderButton.addEventListener("click", () => {
+    handleImportSyncFolder();
+  });
 }
 if (addBondRowButton) {
   addBondRowButton.addEventListener("click", () => {
