@@ -15,9 +15,11 @@ const exportProfitLossDecadeButton = document.getElementById(
   "exportProfitLossDecade"
 );
 const bondTableBody = document.getElementById("bondTableBody");
+const bondMaturedBody = document.getElementById("bondMaturedBody");
 const addBondRowButton = document.getElementById("addBondRow");
 const sortBondRowsButton = document.getElementById("sortBondRows");
 const bondAverageRate = document.getElementById("bondAverageRate");
+const bondUsdRateInput = document.getElementById("bondUsdRate");
 const importStatus = document.getElementById("importStatus");
 const exportSyncFolderButton = document.getElementById("exportSyncFolder");
 const importSyncFileButton = document.getElementById("importSyncFile");
@@ -103,6 +105,50 @@ function isCompoundingCategory(key) {
   return key === "funds" || key === "insurance" || key === "nissay";
 }
 
+function toYenAmount(value) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.floor(value);
+}
+
+function normalizeBondStorage(raw) {
+  if (!raw) {
+    return { active: [], matured: [], usdRate: "" };
+  }
+  if (Array.isArray(raw)) {
+    return { active: raw, matured: [], usdRate: "" };
+  }
+  if (raw && typeof raw === "object") {
+    return {
+      active: Array.isArray(raw.active) ? raw.active : [],
+      matured: Array.isArray(raw.matured) ? raw.matured : [],
+      usdRate: raw.usdRate ?? "",
+    };
+  }
+  return { active: [], matured: [], usdRate: "" };
+}
+
+function readBondStorage() {
+  const raw = safeParseJson(localStorage.getItem(BOND_STORAGE_KEY), null);
+  return normalizeBondStorage(raw);
+}
+
+function writeBondStorage(data) {
+  try {
+    localStorage.setItem(
+      BOND_STORAGE_KEY,
+      JSON.stringify({
+        active: data.active || [],
+        matured: data.matured || [],
+        usdRate: data.usdRate ?? "",
+      })
+    );
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 function parseNumber(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -181,10 +227,13 @@ function simulateToAge100Detailed({
   contributionSchedule,
   categories,
   categoryRates,
+  bondMaturities,
+  usdRate,
 }) {
   const months = Math.max(0, monthsRemaining);
   let data = { ...categories };
   const startMonthIndex = monthIndex(startDate);
+  const maturitySchedule = buildBondMaturitySchedule(bondMaturities, usdRate);
   const investKeys = [
     "stocks",
     "funds",
@@ -222,6 +271,8 @@ function simulateToAge100Detailed({
         data[item.category] += item.amount;
       }
     });
+
+    applyBondMaturities(data, maturitySchedule, monthIndexValue);
   }
 
   return { months, assets: sumCategoryTotal(data) };
@@ -237,6 +288,40 @@ function getContributionForMonth(monthIndexValue, schedule) {
     }
     return sum;
   }, 0);
+}
+
+function buildBondMaturitySchedule(bondMaturities, usdRate) {
+  const schedule = new Map();
+  if (!bondMaturities || bondMaturities.length === 0) {
+    return schedule;
+  }
+  bondMaturities.forEach((bond) => {
+    if (!bond.maturityDate || !Number.isFinite(bond.faceValue)) {
+      return;
+    }
+    const monthKey = monthIndex(bond.maturityDate);
+    const rate = bond.currency === "USD" ? usdRate : 1;
+    const amount = toYenAmount(bond.faceValue * rate);
+    if (!amount) {
+      return;
+    }
+    schedule.set(monthKey, (schedule.get(monthKey) || 0) + amount);
+  });
+  return schedule;
+}
+
+function applyBondMaturities(data, schedule, monthIndexValue) {
+  if (!schedule || !schedule.size) {
+    return 0;
+  }
+  const amount = schedule.get(monthIndexValue);
+  if (!amount) {
+    return 0;
+  }
+  const transferable = Math.min(data.bonds, amount);
+  data.bonds -= transferable;
+  data.cash += transferable;
+  return transferable;
 }
 
 function findNegativeCashMonth({
@@ -282,12 +367,15 @@ function simulateAnnualSeries({
   postRetirementMonthlyNetCash,
   contributionSchedule,
   categories,
+  bondMaturities,
+  usdRate,
 }) {
   const monthlyRate = Math.pow(1 + annualRate, 1 / 12) - 1;
   const rows = [];
   const totalMonths = Math.max(0, monthsRemaining);
   let data = { ...categories };
   const startMonthIndex = monthIndex(startDate);
+  const maturitySchedule = buildBondMaturitySchedule(bondMaturities, usdRate);
   const investKeys = [
     "stocks",
     "funds",
@@ -325,6 +413,8 @@ function simulateAnnualSeries({
         data[item.category] += item.amount;
       }
     });
+
+    applyBondMaturities(data, maturitySchedule, monthIndexValue);
 
     const isYearEnd = (i + 1) % 12 === 0;
     const isFinal = i === totalMonths - 1;
@@ -380,12 +470,15 @@ function simulateAnnualStatements({
   pensionExpense,
   contributionSchedule,
   categories,
+  bondMaturities,
+  usdRate,
 }) {
   const monthlyRate = Math.pow(1 + annualRate, 1 / 12) - 1;
   const rows = [];
   const totalMonths = Math.max(0, monthsRemaining);
   let data = { ...categories };
   const startMonthIndex = monthIndex(startDate);
+  const maturitySchedule = buildBondMaturitySchedule(bondMaturities, usdRate);
   const investKeys = [
     "stocks",
     "funds",
@@ -403,6 +496,7 @@ function simulateAnnualStatements({
   let yearExpense = 0;
   let yearInvestmentGain = 0;
   let yearContribution = 0;
+  let yearBondMaturity = 0;
   let yearContributionByCategory = {
     stocks: 0,
     funds: 0,
@@ -480,6 +574,12 @@ function simulateAnnualStatements({
       }
     });
 
+    yearBondMaturity += applyBondMaturities(
+      data,
+      maturitySchedule,
+      monthIndexValue
+    );
+
     yearInvestmentGain += monthlyInvestmentGain;
     yearMonths += 1;
 
@@ -505,6 +605,7 @@ function simulateAnnualStatements({
         netCash,
         investmentGain: yearInvestmentGain,
         totalChange,
+        bondMaturity: yearBondMaturity,
         months: yearMonths,
         contributions: yearContribution,
         contributionsByCategory: { ...yearContributionByCategory },
@@ -526,6 +627,7 @@ function simulateAnnualStatements({
       yearInvestmentIncome = 0;
       yearExpense = 0;
       yearInvestmentGain = 0;
+      yearBondMaturity = 0;
       yearContribution = 0;
       yearContributionByCategory = {
         stocks: 0,
@@ -1218,23 +1320,76 @@ function createBondRow(data = {}) {
   });
 }
 
+function createMaturedBondRow(data = {}) {
+  if (!bondMaturedBody) {
+    return;
+  }
+  const row = document.createElement("tr");
+  const cells = [
+    data.name ?? "",
+    data.currency ?? "",
+    data.faceValue ?? "",
+    data.purchasePrice ?? "",
+    data.maturityDate ?? "",
+    data.rate ?? "",
+    data.maturedAt ?? "",
+  ].map((value) => {
+    const td = document.createElement("td");
+    td.textContent = value;
+    return td;
+  });
+  cells.forEach((cell) => row.appendChild(cell));
+  bondMaturedBody.appendChild(row);
+}
+
+function serializeBondRow(row) {
+  const data = {};
+  row.querySelectorAll("input, select").forEach((input) => {
+    data[input.dataset.key] = input.value;
+  });
+  return data;
+}
+
 function persistBondRows() {
   if (!bondTableBody) {
     return;
   }
-  const rows = Array.from(bondTableBody.querySelectorAll("tr")).map((row) => {
-    const data = {};
-    row.querySelectorAll("input, select").forEach((input) => {
-      data[input.dataset.key] = input.value;
-    });
-    return data;
-  });
-  try {
-    localStorage.setItem(BOND_STORAGE_KEY, JSON.stringify(rows));
-  } catch {
-    // Ignore storage failures.
+  const rows = Array.from(bondTableBody.querySelectorAll("tr")).map((row) =>
+    serializeBondRow(row)
+  );
+  const stored = readBondStorage();
+  stored.active = rows;
+  if (bondUsdRateInput) {
+    stored.usdRate = bondUsdRateInput.value;
   }
+  writeBondStorage(stored);
   updateBondAverageRate();
+}
+
+function isBondMatured(data, today) {
+  const maturity = parseDate(data.maturityDate);
+  if (!maturity) {
+    return false;
+  }
+  return maturity.getTime() <= today.getTime();
+}
+
+function moveMaturedBonds(data, today) {
+  const active = [];
+  let moved = false;
+  data.active.forEach((row) => {
+    if (isBondMatured(row, today)) {
+      data.matured.push({
+        ...row,
+        maturedAt: formatDate(today),
+      });
+      moved = true;
+      return;
+    }
+    active.push(row);
+  });
+  data.active = active;
+  return moved;
 }
 
 function loadBondRows() {
@@ -1242,25 +1397,30 @@ function loadBondRows() {
     return;
   }
   bondTableBody.innerHTML = "";
-  try {
-    const raw = localStorage.getItem(BOND_STORAGE_KEY);
-    if (!raw) {
-      createBondRow();
-      updateBondAverageRate();
-      return;
-    }
-    const rows = JSON.parse(raw);
-    if (!Array.isArray(rows) || rows.length === 0) {
-      createBondRow();
-      updateBondAverageRate();
-      return;
-    }
-    rows.forEach((row) => createBondRow(row));
-    updateBondAverageRate();
-  } catch {
-    createBondRow();
-    updateBondAverageRate();
+  if (bondMaturedBody) {
+    bondMaturedBody.innerHTML = "";
   }
+  const stored = readBondStorage();
+  const today = new Date();
+  const moved = moveMaturedBonds(stored, today);
+  if (bondUsdRateInput) {
+    bondUsdRateInput.value = stored.usdRate ?? "";
+    bondUsdRateInput.addEventListener("input", () => {
+      const next = readBondStorage();
+      next.usdRate = bondUsdRateInput.value;
+      writeBondStorage(next);
+    });
+  }
+  if (!stored.active.length) {
+    createBondRow();
+  } else {
+    stored.active.forEach((row) => createBondRow(row));
+  }
+  stored.matured.forEach((row) => createMaturedBondRow(row));
+  if (moved) {
+    writeBondStorage(stored);
+  }
+  updateBondAverageRate();
 }
 
 function sortBondRowsByMaturity() {
@@ -1269,10 +1429,7 @@ function sortBondRowsByMaturity() {
   }
   const rows = Array.from(bondTableBody.querySelectorAll("tr")).map(
     (row, index) => {
-      const data = {};
-      row.querySelectorAll("input, select").forEach((input) => {
-        data[input.dataset.key] = input.value;
-      });
+      const data = serializeBondRow(row);
       return { data, index };
     }
   );
@@ -1349,7 +1506,7 @@ function buildSyncPayload() {
   persistInputsToStorage();
   persistBondRows();
   const inputs = safeParseJson(localStorage.getItem(STORAGE_KEY), {});
-  const bonds = safeParseJson(localStorage.getItem(BOND_STORAGE_KEY), []);
+  const bonds = readBondStorage();
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
@@ -1402,7 +1559,7 @@ function importSyncPayload(raw) {
     return false;
   }
   const inputs = isPlainObject(data.inputs) ? data.inputs : null;
-  const bonds = Array.isArray(data.bonds) ? data.bonds : null;
+  const bonds = data.bonds ? normalizeBondStorage(data.bonds) : null;
   if (!inputs && !bonds) {
     window.alert("同期データに読み込める内容がありません。");
     return false;
@@ -1412,7 +1569,7 @@ function importSyncPayload(raw) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(inputs));
     }
     if (bonds) {
-      localStorage.setItem(BOND_STORAGE_KEY, JSON.stringify(bonds));
+      writeBondStorage(bonds);
     }
   } catch {
     window.alert("同期データの保存に失敗しました。");
@@ -1666,6 +1823,8 @@ function handleExportCsv() {
       context.retireExpenseTotal,
     contributionSchedule: buildContributionSchedule(context.birthDate),
     categories: context.categories,
+    bondMaturities: context.bondMaturities,
+    usdRate: context.usdRate,
   });
 
   if (!rows.length) {
@@ -1724,6 +1883,13 @@ function getSimulationContext() {
         : toMonthlyRate(rateInsurance / 100),
     other: 0,
   };
+  const storedBonds = readBondStorage();
+  const usdRate = parseNumber(bondUsdRateInput?.value ?? storedBonds.usdRate) ?? 0;
+  const bondMaturities = (storedBonds.active || []).map((row) => ({
+    maturityDate: parseDate(row.maturityDate),
+    currency: row.currency || "JPY",
+    faceValue: parseNumber(row.faceValue) || 0,
+  }));
   const expenseTotal = sumInputs(expenseInputs);
   const incomeTotal = sumInputs(incomeInputs);
   const retireExpenseTotal = sumInputs(retireExpenseInputs);
@@ -1768,6 +1934,8 @@ function getSimulationContext() {
     pensionIncomeTotal,
     ongoingIncome,
     categories,
+    bondMaturities,
+    usdRate,
   };
 }
 
@@ -1795,6 +1963,8 @@ function buildStatementRows({ showAlert }) {
     pensionExpense: context.retireExpenseTotal,
     contributionSchedule: buildContributionSchedule(context.birthDate),
     categories: context.categories,
+    bondMaturities: context.bondMaturities,
+    usdRate: context.usdRate,
   });
 
   if (!rows.length) {
@@ -1915,9 +2085,10 @@ function buildBalanceSheetCsvLine(row, birthDate) {
     row.gainsByCategory.insurance,
     row.gainsByCategory.nissay,
   ]);
+  const bondMaturityExpression = toCsvNumber(row.bondMaturity || 0);
   const cashEndExpression = `${toCsvNumber(row.start.cash)}+(${cashIncomeExpression})-(${expenseExpression})-${toCsvNumber(
     row.contributions
-  )}`;
+  )}+${bondMaturityExpression}`;
   const endTotalExpression = `${toCsvNumber(
     row.start.total
   )}+(${netExpression})+(${investmentGainExpression})`;
@@ -1960,6 +2131,7 @@ function buildBalanceSheetCsvLine(row, birthDate) {
       buildSignedExpression([
         row.start.bonds,
         row.contributionsByCategory.bonds,
+        -bondMaturityExpression,
         gainForCategoryInBalance(row, "bonds"),
       ])
     ),
@@ -2026,9 +2198,7 @@ function buildProfitLossCsvLine(row, birthDate) {
     { amount: row.retireExpense, months: row.retireMonths },
     { amount: row.pensionExpense, months: row.pensionMonths },
   ]);
-  const incomeExpression = `${cashIncomeExpression}+${toCsvNumber(
-    row.investmentIncome
-  )}`;
+  const incomeExpression = `${cashIncomeExpression}`;
   const netExpression = `(${incomeExpression})-(${expenseExpression})`;
   const investmentGainExpression = buildSignedExpression([
     row.gainsByCategory.stocks,
@@ -2270,6 +2440,8 @@ function render() {
             postRetirementMonthlyNetCash,
             contributionSchedule,
             categories,
+            bondMaturities: getSimulationContext()?.bondMaturities,
+            usdRate: getSimulationContext()?.usdRate,
           });
           negativeRow = rows.find((row) => row.cash < 0);
         }
@@ -2339,6 +2511,8 @@ function render() {
         contributionSchedule,
         categories: context.categories,
         categoryRates: context.categoryRates,
+        bondMaturities: context.bondMaturities,
+        usdRate: context.usdRate,
       })
     : simulateToAge100({
         currentAssets,

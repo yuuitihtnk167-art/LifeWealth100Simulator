@@ -433,6 +433,18 @@ button:hover {
   gap: 10px;
 }
 
+.bond-matured {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.bond-matured h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
 .bond-average {
   font-size: 13px;
   color: var(--muted);
