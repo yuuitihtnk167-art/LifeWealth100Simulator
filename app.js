@@ -19,7 +19,8 @@ const addBondRowButton = document.getElementById("addBondRow");
 const bondAverageRate = document.getElementById("bondAverageRate");
 const importStatus = document.getElementById("importStatus");
 const exportSyncFolderButton = document.getElementById("exportSyncFolder");
-const importSyncFolderButton = document.getElementById("importSyncFolder");
+const importSyncFileButton = document.getElementById("importSyncFile");
+const syncFileInput = document.getElementById("syncFileInput");
 const syncStatus = document.getElementById("syncStatus");
 const expenseInputs = Array.from(document.querySelectorAll(".expense-input"));
 const monthlyExpense = document.getElementById("monthlyExpense");
@@ -1282,29 +1283,6 @@ async function handleExportSyncFolder() {
   }
 }
 
-async function handleImportSyncFolder() {
-  if (!window.showDirectoryPicker) {
-    window.alert("このブラウザはフォルダー選択に対応していません。");
-    return;
-  }
-  try {
-    const dirHandle = await window.showDirectoryPicker();
-    const fileHandle = await dirHandle.getFileHandle("LifeWealth100_sync.json");
-    const file = await fileHandle.getFile();
-    const text = await file.text();
-    importSyncPayload(text);
-  } catch (error) {
-    if (error && error.name === "AbortError") {
-      return;
-    }
-    if (error && error.name === "NotFoundError") {
-      window.alert("フォルダー内に LifeWealth100_sync.json がありません。");
-      return;
-    }
-    window.alert("フォルダーからの復元に失敗しました。");
-  }
-}
-
 function importSyncPayload(raw) {
   const trimmed = raw.trim();
   if (!trimmed) {
@@ -2346,9 +2324,28 @@ if (exportSyncFolderButton) {
     handleExportSyncFolder();
   });
 }
-if (importSyncFolderButton) {
-  importSyncFolderButton.addEventListener("click", () => {
-    handleImportSyncFolder();
+if (importSyncFileButton && syncFileInput) {
+  importSyncFileButton.addEventListener("click", () => {
+    syncFileInput.click();
+  });
+  syncFileInput.addEventListener("change", () => {
+    const file = syncFileInput.files ? syncFileInput.files[0] : null;
+    if (!file) {
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = typeof reader.result === "string" ? reader.result : "";
+      if (!text) {
+        window.alert("ファイルの読み込みに失敗しました。");
+        return;
+      }
+      importSyncPayload(text);
+    };
+    reader.onerror = () => {
+      window.alert("ファイルの読み込みに失敗しました。");
+    };
+    reader.readAsText(file);
   });
 }
 if (addBondRowButton) {
