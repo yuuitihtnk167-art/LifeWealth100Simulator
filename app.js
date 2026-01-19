@@ -1,4 +1,33 @@
-﻿const birthDateInput = document.getElementById("birthDate");
+﻿/**
+ * LifeWealth 100 Simulator
+ * 
+ * 会計処理に関する注記：
+ * 
+ * 資産カテゴリー分類：
+ * - cash：現金・預金（現金等価物）
+ * - stocks：株式・現物株式（当初原価ベース）
+ * - funds：投資信託・ファンド（複利計算により含み益を認識）
+ * - bonds：債券・固定利付証券（当初原価ベース、満期時に額面現金化）
+ * - insurance：保険商品（複利計算により含み益を認識）
+ * - dc：確定拠出年金・企業年金（拠出フェーズと給付フェーズで区分）
+ * - points：ポイント・マイル等（雑資産、時価評価）
+ * - other：その他資産（外貨等、当初原価ベース）
+ * 
+ * 運用益の認識：
+ * - 複利計算対象（funds、insurance）：期中の利息・配当を含み益として計上
+ * - その他：期中の時価変動を反映しない（当初原価ベース）
+ * - 注：実現益と含み益を区分していない
+ * 
+ * 投資拠出の処理：
+ * - 拠出（contribution）は資産の増加であり、損益計算書上の支出ではない
+ * - 現金から各資産カテゴリーへの配分変更として処理
+ * 
+ * 年金・DC処理：
+ * - 拠出期：開始年齢未満の期間に毎月拠出
+ * - 給付期：開始年齢以上の期間に一括または分割で給付
+ */
+
+const birthDateInput = document.getElementById("birthDate");
 const currentAssetsInput = document.getElementById("currentAssets");
 const retirementAgeInput = document.getElementById("retirementAge");
 const assetDataInput = document.getElementById("assetData");
@@ -121,6 +150,12 @@ const percentFormatter = new Intl.NumberFormat("ja-JP", {
   maximumFractionDigits: 2,
 });
 
+// 会計処理：複利計算対象カテゴリーの定義
+// 投資信託（funds）と保険（insurance）のみ期中利息/配当を含む（複利計算）
+// 他のカテゴリー（現金、株式、債券等）は期中の時価変動を反映しない（当初原価ベース）
+// 会計処理：複利計算対象カテゴリーの定義
+// 投資信託（funds）と保険（insurance）のみ期中利息/配当を含む（複利計算）
+// 他のカテゴリー（現金、株式、債券等）は期中の時価変動を反映しない（当初原価ベース）
 function isCompoundingCategory(key) {
   return key === "funds" || key === "insurance";
 }
@@ -206,7 +241,14 @@ function writePensionChanges(rows) {
 }
 
 function parseNumber(value) {
-  const parsed = Number(value);
+  const text = String(value ?? "");
+  const normalized = text
+    .replace(/[０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
+    .replace(/[－−]/g, "-")
+    .replace(/[．]/g, ".")
+    .replace(/[,\uFF0C]/g, "")
+    .replace(/[¥￥]/g, "");
+  const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -515,7 +557,11 @@ function applyPensionPlanFlow(data, monthIndexValue, planState) {
   let transfer = 0;
 
   planState.forEach((plan) => {
+    // 会計処理：年金拠出フェーズと給付フェーズの区分
+    // monthIndexValue < plan.startMonthIndex：拠出期間（開始年齢到達まで毎月拠出）
+    // monthIndexValue >= plan.startMonthIndex：給付期間（開始年齢以降から給付開始）
     if (monthIndexValue < plan.startMonthIndex) {
+      // 拠出フェーズ：年金資産を積み立てる
       const amount = getPensionContributionAmount(monthIndexValue, plan);
       if (amount > 0) {
         contribution += amount;
@@ -527,6 +573,7 @@ function applyPensionPlanFlow(data, monthIndexValue, planState) {
     }
 
     if (plan.payoutType === "lump") {
+      // 給付フェーズ（一括給付）：開始年齢に達した月に一度だけ給付
       if (!plan.paid) {
         const transferable = Math.min(plan.balance, data.dc);
         if (transferable > 0) {
@@ -540,6 +587,7 @@ function applyPensionPlanFlow(data, monthIndexValue, planState) {
       return;
     }
 
+    // 給付フェーズ（分割給付）：開始年齢以降、毎年1回に分割給付
     if ((monthIndexValue - plan.startMonthIndex) % 12 === 0) {
       const amount = plan.installmentAmount || 0;
       const transferable = Math.min(plan.balance, amount, data.dc);
@@ -624,6 +672,89 @@ function findNegativeCashMonth({
       return monthIndexValue;
     }
   }
+  return null;
+}
+
+function findNegativeCashMonthDetailed({
+  startDate,
+  monthsRemaining,
+  annualRate,
+  categoryRates,
+  retirementAge,
+  retirementIncomeEndAge,
+  monthlyNetCash,
+  retirementMonthlyNetCash,
+  postRetirementMonthlyNetCash,
+  contributionSchedule,
+  categories,
+  bondMaturities,
+  usdRate,
+  insuranceContributionSchedule,
+  pensionPlanState,
+}) {
+  const monthlyRate = Math.pow(1 + annualRate, 1 / 12) - 1;
+  const totalMonths = Math.max(0, monthsRemaining);
+  let data = { ...categories };
+  const startMonthIndex = monthIndex(startDate);
+  const maturitySchedule = buildBondMaturitySchedule(bondMaturities, usdRate);
+  const planState = clonePensionPlanState(pensionPlanState);
+  const investKeys = [
+    "stocks",
+    "funds",
+    "bonds",
+    "insurance",
+    "dc",
+    "other",
+  ];
+
+  for (let i = 0; i < totalMonths; i += 1) {
+    const monthIndexValue = startMonthIndex + i;
+    let cashFlow = monthlyNetCash;
+    if (monthIndexValue >= retirementAge) {
+      cashFlow = retirementMonthlyNetCash;
+    }
+    if (monthIndexValue >= retirementIncomeEndAge) {
+      cashFlow = postRetirementMonthlyNetCash;
+    }
+
+    investKeys.forEach((key) => {
+      const rate = categoryRates?.[key] ?? monthlyRate;
+      if (isCompoundingCategory(key)) {
+        data[key] += data[key] * rate;
+      }
+    });
+
+    data.cash += cashFlow;
+
+    contributionSchedule.forEach((item) => {
+      if (monthIndexValue < item.endMonthIndex) {
+        const amount =
+          item.category === "insurance"
+            ? getInsuranceContributionAmount(
+                monthIndexValue,
+                insuranceContributionSchedule,
+                item.amount
+              )
+            : item.amount;
+        if (item.category !== "cash") {
+          data.cash -= amount;
+        }
+        data[item.category] += amount;
+      }
+    });
+
+    applyBondMaturities(data, maturitySchedule, monthIndexValue);
+    applyPensionPlanFlow(data, monthIndexValue, planState);
+
+    if (data.cash < 0) {
+      return {
+        monthIndex: monthIndexValue,
+        date: addMonths(startDate, i + 1),
+        cash: data.cash,
+      };
+    }
+  }
+
   return null;
 }
 
@@ -772,15 +903,17 @@ function simulateAnnualStatements({
     "other",
   ];
 
-  let yearStart = { ...data };
-  let yearIncome = 0;
-  let yearCashIncome = 0;
-  let yearInvestmentIncome = 0;
-  let yearExpense = 0;
-  let yearInvestmentGain = 0;
-  let yearContribution = 0;
-  let yearBondMaturity = 0;
-  let yearPensionTransfer = 0;
+  // 会計処理：年次決算データ初期化
+  // 年度開始時点の残高、年間の収支、運用益を月次で累積して年度決算を作成
+  let yearStart = { ...data };  // 期首残高
+  let yearIncome = 0;            // 総現金収入
+  let yearCashIncome = 0;        // 給与・pension等の現金収入
+  let yearInvestmentIncome = 0;  // 配当等の投資収入（未使用）
+  let yearExpense = 0;           // 総現金支出
+  let yearInvestmentGain = 0;    // 運用益（含み益）
+  let yearContribution = 0;      // 投資支出（資産移動）
+  let yearBondMaturity = 0;      // 債券償還による現金化
+  let yearPensionTransfer = 0;   // 年金給付による現金化
   let yearContributionByCategory = {
     stocks: 0,
     funds: 0,
@@ -820,12 +953,15 @@ function simulateAnnualStatements({
       phase = "pension";
     }
 
+    // 会計処理：運用益（含み益）の計算
+    // 複利計算対象カテゴリーのみ期中の利息/配当を認識
+    // 注：実現益と含み益を区分していない（含み益ベースで計算）
     let monthlyInvestmentGain = 0;
     investKeys.forEach((key) => {
       const rate = categoryRates?.[key] ?? monthlyRate;
       const gain = isCompoundingCategory(key) ? data[key] * rate : 0;
       if (isCompoundingCategory(key)) {
-        data[key] += gain;
+        data[key] += gain;  // 運用益を資産に加算（含み益の認識）
       }
       yearGainByCategory[key] += gain;
       monthlyInvestmentGain += gain;
@@ -843,6 +979,8 @@ function simulateAnnualStatements({
       yearPensionMonths += 1;
     }
 
+    // 会計処理：投資支出（資産配分）
+    // 拠出は資産の増加（投資信託や保険への振替）であり、損益計算書上の支出ではない
     contributionSchedule.forEach((item) => {
       if (monthIndexValue < item.endMonthIndex) {
         const amount =
@@ -858,9 +996,9 @@ function simulateAnnualStatements({
           yearContributionByCategory[item.category] += amount;
         }
         if (item.category !== "cash") {
-          data.cash -= amount;
+          data.cash -= amount;  // 現金減少
         }
-        data[item.category] += amount;
+        data[item.category] += amount;  // 対応する資産カテゴリー増加
       }
     });
 
@@ -888,6 +1026,11 @@ function simulateAnnualStatements({
       const endDate = addMonths(startDate, i + 1);
       const startTotal = sumCategoryTotal(yearStart);
       const endTotal = sumCategoryTotal(data);
+      // 会計処理：年度決算の資産増減分析
+      // netCash = 現金ベースの収支（収入 - 支出）
+      // investmentGain = 運用益（含み益）
+      // totalChange = 資産増減の総額（netCash + investmentGain）
+      // 期末残高 = 期首残高 + 資産増減総額
       const netCash = yearIncome - yearExpense;
       const totalChange = netCash + yearInvestmentGain;
       const mismatch =
@@ -956,6 +1099,47 @@ function simulateAnnualStatements({
   return rows;
 }
 
+function getSummaryRowValues(headers, row) {
+  const getAmount = (regex) => {
+    const idx = mapHeaderIndex(headers, regex);
+    if (idx === null) {
+      return 0;
+    }
+    return parseAmount(row[idx] || "") || 0;
+  };
+  const totalIndex = findSummaryTotalIndex(headers);
+  const rawTotal =
+    totalIndex === null ? 0 : parseAmount(row[totalIndex] || "") || 0;
+  const cash = getAmount(/預金|現金|暗号資産/);
+  const stocks = getAmount(/株式/);
+  const funds = getAmount(/投資信託/);
+  const bonds = getAmount(/債券/);
+  const insurance = getAmount(/保険/);
+  const pension = getAmount(/年金/);
+  const points = getAmount(/ポイント/);
+  const other = getAmount(/その他/);
+  const investmentsTotal =
+    stocks + funds + bonds + insurance + pension + points + other;
+  const derivedTotal = cash + investmentsTotal;
+  const total =
+    derivedTotal > 0 &&
+    cash > 0 &&
+    (rawTotal <= 0 || rawTotal <= investmentsTotal)
+      ? derivedTotal
+      : rawTotal;
+  return {
+    total,
+    cash,
+    stocks,
+    funds,
+    bonds,
+    insurance,
+    pension,
+    points,
+    other,
+  };
+}
+
 function getSummaryBreakdown(text) {
   const table = parseTable(text);
   if (!table) {
@@ -980,26 +1164,7 @@ function getSummaryBreakdown(text) {
     return null;
   }
 
-  const getAmount = (regex) => {
-    const idx = mapHeaderIndex(table.headers, regex);
-    if (idx === null) {
-      return 0;
-    }
-    return parseAmount(bestRow[idx] || "") || 0;
-  };
-
-  const total = getAmount(/合計/);
-  return {
-    total,
-    cash: getAmount(/預金|現金|暗号資産/),
-    stocks: getAmount(/株式/),
-    funds: getAmount(/投資信託/),
-    bonds: getAmount(/債券/),
-    insurance: getAmount(/保険/),
-    pension: getAmount(/年金/),
-    points: getAmount(/ポイント/),
-    other: getAmount(/その他/),
-  };
+  return getSummaryRowValues(table.headers, bestRow);
 }
 
 function buildContributionSchedule(birthDate, options = {}) {
@@ -1101,10 +1266,13 @@ function updateCurrentAssetsFromInvestmentBalances() {
   render();
 }
 
+// 会計処理：初期資産の分類
+// マネーフォワードなどからのインポートデータを、各資産カテゴリーに分類
+// ユーザーの調整値を加算して初期残高を確定
 function buildInitialCategories(summaryBreakdown, currentAssets) {
   const adjustments = getInvestmentAdjustments();
   if (summaryBreakdown) {
-    const total =
+    const totalFromInput =
       Number.isFinite(currentAssets) ?
         currentAssets :
         summaryBreakdown.total ||
@@ -1131,9 +1299,24 @@ function buildInitialCategories(summaryBreakdown, currentAssets) {
     );
     const points = summaryBreakdown.points || 0;
     const other = (summaryBreakdown.other || 0) + usdBalance;
+    const cashFromSummary =
+      Number.isFinite(summaryBreakdown.cash) ? summaryBreakdown.cash : null;
+    const investmentTotal = stocks + funds + bonds + insurance + dc + points + other;
+    const derivedTotal =
+      (cashFromSummary || 0) + investmentTotal;
+    const total =
+      derivedTotal > 0 && totalFromInput < derivedTotal
+        ? derivedTotal
+        : totalFromInput;
     const cash =
-      total -
-      (stocks + funds + bonds + insurance + dc + points + other);
+      cashFromSummary !== null ? cashFromSummary : total - investmentTotal;
+    if (cash < 0) {
+      console.warn(
+        `警告：マネーフォワード取込後、投資資産の合計が総資産を超えています。` +
+        `調整値を確認してください。現金残高がマイナス（${cash}）です。`
+      );
+    }
+    
     return {
       cash: cash || 0,
       stocks,
@@ -1171,12 +1354,24 @@ function buildInitialCategories(summaryBreakdown, currentAssets) {
     parseNumber(balanceUsdInput.value),
     adjustments.usd
   );
-  const cash =
-    (parseNumber(currentAssets) || 0) -
-    (stocks + funds + bonds + insurance + dc + usd);
+  // 会計処理：初期現金残高の計算
+  // 現在資産 = 現金 + 各投資資産 の関係から現金を逆算
+  // 投資資産の合計が現在資産を超えないようにチェック（超える場合は警告）
+  const investmentTotal = stocks + funds + bonds + insurance + dc + usd;
+  const currentAssetsValue = parseNumber(currentAssets) || 0;
+  let cash = currentAssetsValue - investmentTotal;
+  
+  // 注：投資資産が現在資産を超える場合、現金がマイナスになることを警告
+  // これはユーザーが入力値を誤った場合に発生
+  if (cash < 0) {
+    console.warn(
+      `警告：投資資産の合計（${investmentTotal}）が現在資産総額（${currentAssetsValue}）を超えています。` +
+      `現金残高がマイナス（${cash}）になります。入力値を確認してください。`
+    );
+  }
 
   return {
-    cash,
+    cash: Math.max(0, cash),  // 現金がマイナスになるのを防ぐ（0以上に調整）
     stocks,
     funds,
     bonds,
@@ -1184,7 +1379,7 @@ function buildInitialCategories(summaryBreakdown, currentAssets) {
     dc,
     points: 0,
     other: usd,
-    total: currentAssets || 0,
+    total: currentAssetsValue,
   };
 }
 
@@ -1314,6 +1509,35 @@ function detectDelimiter(lines) {
   return null;
 }
 
+function parseDelimitedLine(line, delimiter) {
+  if (delimiter instanceof RegExp) {
+    return line.split(delimiter).map((cell) => cell.trim());
+  }
+  const cells = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === "\"") {
+      if (inQuotes && line[i + 1] === "\"") {
+        current += "\"";
+        i += 1;
+        continue;
+      }
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (!inQuotes && ch === delimiter) {
+      cells.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
 function parseTable(text) {
   const lines = text
     .split(/\r?\n/)
@@ -1329,7 +1553,7 @@ function parseTable(text) {
     return null;
   }
 
-  const rows = lines.map((line) => line.split(delimiter).map((cell) => cell.trim()));
+  const rows = lines.map((line) => parseDelimitedLine(line, delimiter));
   const headers = rows[0];
   const dataRows = rows.slice(1);
   return { headers, dataRows };
@@ -1340,6 +1564,24 @@ function mapHeaderIndex(headers, regex) {
   return index === -1 ? null : index;
 }
 
+function findSummaryTotalIndex(headers) {
+  const normalized = headers.map((header) => String(header || ""));
+  const find = (regex, excludeRegex) => {
+    for (let i = 0; i < normalized.length; i += 1) {
+      const header = normalized[i];
+      if (regex.test(header) && (!excludeRegex || !excludeRegex.test(header))) {
+        return i;
+      }
+    }
+    return null;
+  };
+  return (
+    find(/純資産|資産純額|純資産合計/) ??
+    find(/資産合計|総資産|資産総額/, /投資|運用|金融|有価証券/) ??
+    find(/合計/, /負債|投資|収支|損益/)
+  );
+}
+
 function sumInvestmentsFromList(text) {
   const table = parseTable(text);
   if (!table) {
@@ -1348,7 +1590,10 @@ function sumInvestmentsFromList(text) {
 
   const typeIndex = mapHeaderIndex(table.headers, /資産区分/);
   const nameIndex = mapHeaderIndex(table.headers, /名称/);
-  const amountIndex = mapHeaderIndex(table.headers, /金額.*円/);
+  const amountIndex = mapHeaderIndex(
+    table.headers,
+    /(金額|評価額|残高).*円/
+  );
   if (typeIndex === null || amountIndex === null) {
     return sumInvestmentsFromText(text);
   }
@@ -1370,6 +1615,14 @@ function sumInvestmentsFromList(text) {
       return;
     }
 
+    if (/ニッセイみらいのカタチ/.test(name)) {
+      totals.dc += amount;
+      return;
+    }
+    if (/DC|確定拠出|ベネフィット|あおぞら/.test(name)) {
+      totals.dc += amount;
+      return;
+    }
     if (/代表口座-米ドル普通\s*住信SBIネット銀行/.test(name)) {
       totals.usd += amount;
       return;
@@ -1395,14 +1648,7 @@ function sumInvestmentsFromList(text) {
       return;
     }
     if (/年金/.test(type)) {
-      if (/ニッセイみらいのカタチ/.test(name)) {
-        totals.dc += amount;
-        return;
-      }
-      if (/DC|確定拠出|ベネフィット|あおぞら/.test(name)) {
-        totals.dc += amount;
-        return;
-      }
+      return;
     }
   });
 
@@ -1465,6 +1711,16 @@ function sumInvestmentsFromText(text) {
       return;
     }
 
+    if (/ニッセイみらいのカタチ/.test(line)) {
+      totals.dc += amount;
+      matched = true;
+      return;
+    }
+    if (/DC|確定拠出|ベネフィット|あおぞら/.test(line)) {
+      totals.dc += amount;
+      matched = true;
+      return;
+    }
     if (/代表口座-米ドル普通\s*住信SBIネット銀行/.test(line)) {
       totals.usd += amount;
       matched = true;
@@ -1497,16 +1753,7 @@ function sumInvestmentsFromText(text) {
       return;
     }
     if (currentSection === "pension") {
-      if (/ニッセイみらいのカタチ/.test(line)) {
-        totals.dc += amount;
-        matched = true;
-        return;
-      }
-      if (/DC|確定拠出|ベネフィット|あおぞら/.test(line)) {
-        totals.dc += amount;
-        matched = true;
-        return;
-      }
+      return;
     }
   });
 
@@ -1514,13 +1761,25 @@ function sumInvestmentsFromText(text) {
 }
 
 function parseAmount(value) {
-  const match = value.match(/-?\d[\d,]*/);
+  const text = String(value ?? "").replace(/\s/g, "");
+  let isNegative = false;
+  if (/^\(.*\)$/.test(text)) {
+    isNegative = true;
+  }
+  if (/[▲△]/.test(text)) {
+    isNegative = true;
+  }
+  const match = text.match(/\d[\d,]*/);
   if (!match) {
     return null;
   }
   const normalized = match[0].replace(/,/g, "");
   const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  const hasMinus = /-/.test(text);
+  return isNegative || hasMinus ? -Math.abs(parsed) : parsed;
 }
 
 function sumInputs(inputs) {
@@ -2131,6 +2390,71 @@ function updatePensionDetailSummary() {
     : "-";
 }
 
+function computePensionContributionForDate(birthDate, plans, changes, atDate) {
+  if (!plans || plans.length === 0) {
+    return null;
+  }
+  const changeMap = new Map();
+  (changes || []).forEach((row) => {
+    if (!row || !row.planId) {
+      return;
+    }
+    const age = parseNumber(row.age);
+    const amount = parseNumber(row.amount);
+    if (age === null || amount === null || !birthDate) {
+      return;
+    }
+    const monthIndexValue = monthIndex(addYears(birthDate, age));
+    if (!changeMap.has(row.planId)) {
+      changeMap.set(row.planId, []);
+    }
+    changeMap.get(row.planId).push({ monthIndex: monthIndexValue, amount });
+  });
+
+  if (!birthDate) {
+    return plans.reduce(
+      (sum, plan) => sum + (parseNumber(plan.amount) || 0),
+      0
+    );
+  }
+
+  const currentMonthIndex = monthIndex(atDate || new Date());
+  return plans.reduce((sum, plan) => {
+    const baseAmount = parseNumber(plan.amount) || 0;
+    let amount = baseAmount;
+    const changesForPlan = (changeMap.get(plan.id) || []).sort(
+      (a, b) => a.monthIndex - b.monthIndex
+    );
+    changesForPlan.forEach((change) => {
+      if (change.monthIndex <= currentMonthIndex) {
+        amount = change.amount;
+      }
+    });
+    return sum + amount;
+  }, 0);
+}
+
+function syncDcContributionFromPensionDetail(birthDate, plans, changes, atDate) {
+  if (!contribDcInput || !plans || plans.length === 0) {
+    return false;
+  }
+  const amount = computePensionContributionForDate(
+    birthDate,
+    plans,
+    changes,
+    atDate
+  );
+  if (!Number.isFinite(amount)) {
+    return false;
+  }
+  const nextValue = String(Math.round(amount));
+  if (contribDcInput.value === nextValue) {
+    return false;
+  }
+  contribDcInput.value = nextValue;
+  return true;
+}
+
 function persistBondRows() {
   if (!bondTableBody) {
     return;
@@ -2428,7 +2752,9 @@ function sumAssetsFromList(text) {
     return null;
   }
 
-  const amountIndex = table.headers.findIndex((header) => /金額.*円/.test(header));
+  const amountIndex = table.headers.findIndex((header) =>
+    /(金額|評価額|残高).*円/.test(header)
+  );
   if (amountIndex === -1) {
     return null;
   }
@@ -2498,18 +2824,16 @@ function latestTotalFromSummary(text) {
   }
 
   const dateIndex = table.headers.findIndex((header) => /日付/.test(header));
-  const totalIndex = table.headers.findIndex((header) => /合計/.test(header));
-  if (totalIndex === -1) {
+  const totalIndex = findSummaryTotalIndex(table.headers);
+  if (totalIndex === null) {
     return null;
   }
 
   let best = null;
 
   table.dataRows.forEach((row, index) => {
-    const total = row[totalIndex] ? parseAmount(row[totalIndex]) : null;
-    if (total === null) {
-      return;
-    }
+    const values = getSummaryRowValues(table.headers, row);
+    const total = Number.isFinite(values.total) ? values.total : null;
     const dateValue = dateIndex === -1 ? null : parseDateValue(row[dateIndex]);
     const rank = dateValue ?? index;
 
@@ -2717,7 +3041,9 @@ function getSimulationContext() {
     (retireIncomeMap.bonus || 0);
   const pensionIncomeTotal = sumInputs(pensionIncomeInputs);
   const ongoingIncome = (incomeMap.dividend || 0) + (incomeMap.other || 0);
-  const summaryBreakdown = getSummaryBreakdown(summaryDataInput.value);
+  const summaryBreakdown = importDirty
+    ? null
+    : getSummaryBreakdown(summaryDataInput.value);
   const initial = buildInitialCategories(summaryBreakdown, currentAssets);
   const categories = {
     cash: initial.cash,
@@ -3013,6 +3339,10 @@ function buildBalanceSheetCsvLine(row, birthDate) {
 }
 
 function buildProfitLossCsv(row, birthDate) {
+  // 会計処理：損益計算書（P/L）の構造
+  // 本シミュレーターの「損益計算書」は、実際にはキャッシュフロー分析に近い構造
+  // 運用益（含み益）は期中の時価変動を反映しており、実現益と区分されていない
+  // 資産増減 = 収支 + 運用益（含み益）
   const header =
     "年度,年齢,対象月数,収入（円）,支出（円）,収支（円）,運用益（円）,資産増減（円）,期首合計（円）,期末合計（円）";
   const line = buildProfitLossCsvLine(row, birthDate);
@@ -3188,8 +3518,16 @@ function render() {
   const pensionIncomeTotal = sumInputs(pensionIncomeInputs);
   const ongoingIncome = (incomeMap.dividend || 0) + (incomeMap.other || 0);
   const retireIncomeTotal = retireBaseIncome;
+  const today = new Date();
   const pensionPlans = readPensionPlans();
+  const pensionChanges = readPensionChanges();
   const hasPensionPlans = pensionPlans.length > 0;
+  const syncedDcContribution = syncDcContributionFromPensionDetail(
+    birthDate,
+    pensionPlans,
+    pensionChanges,
+    today
+  );
   const contributionSchedule = buildContributionSchedule(birthDate, {
     skipDc: hasPensionPlans,
   });
@@ -3205,7 +3543,6 @@ function render() {
     (parseNumber(contribUsdInput.value) || 0) +
     (parseNumber(contribDcInput.value) || 0);
 
-  const today = new Date();
   const hasBirthDate = birthDate !== null && birthDate <= today;
   const hasRetirement =
     retirementAgeYears !== null &&
@@ -3220,6 +3557,10 @@ function render() {
   const postRetirementMonthlyNetCash =
     pensionIncomeTotal + ongoingIncome - retireExpenseTotal;
 
+  if (syncedDcContribution) {
+    persistInputsToStorage();
+  }
+
   let retirementDate = null;
   let retirementIncomeEndDate = null;
   let monthsRemaining = null;
@@ -3233,30 +3574,44 @@ function render() {
 
   if (investmentTotal) {
     if (Number.isFinite(currentAssets)) {
-      const cashNow = currentAssets - investmentBalanceTotal;
-      const cashAfterValue = cashNow - investmentContributionTotal;
-      const summaryBreakdown = getSummaryBreakdown(summaryDataInput.value);
-      const warningCashNow =
+      const summaryBreakdown = importDirty
+        ? null
+        : getSummaryBreakdown(summaryDataInput.value);
+      const cashNow =
         summaryBreakdown && Number.isFinite(summaryBreakdown.cash)
           ? summaryBreakdown.cash
-          : cashNow;
-      const warningCashAfter = warningCashNow - investmentContributionTotal;
+          : currentAssets - investmentBalanceTotal;
+      const cashAfterValue = cashNow - investmentContributionTotal;
+      const warningCashNow = cashNow;
+      const warningCashAfter = cashAfterValue;
       investmentTotal.textContent = yenFormatter.format(
         Math.round(investmentBalanceTotal)
       );
-      cashBalance.textContent = yenFormatter.format(Math.round(cashNow));
+      cashBalance.textContent = yenFormatter.format(Math.round(Math.max(0, cashNow)));
       investmentContribTotal.textContent = yenFormatter.format(
         Math.round(investmentContributionTotal)
       );
-      investmentAfter.textContent = yenFormatter.format(
-        Math.round(investmentBalanceTotal + investmentContributionTotal)
-      );
-      cashAfter.textContent = yenFormatter.format(Math.round(cashAfterValue));
+      if (investmentAfter) {
+        investmentAfter.textContent = yenFormatter.format(
+          Math.round(investmentBalanceTotal + investmentContributionTotal)
+        );
+      }
+      if (cashAfter) {
+        cashAfter.textContent = yenFormatter.format(
+          Math.round(Math.max(0, cashAfterValue))
+        );
+      }
       if (investmentAlert) {
         const canForecast =
           hasBirthDate && hasRetirement && monthsRemaining !== null;
         let negativeRow = null;
-        if (canForecast) {
+        // 会計チェック：初期現金残高がマイナスの場合
+        if (cashNow < 0) {
+          investmentAlert.textContent =
+            "エラー：現在の現金残高がマイナスです。投資資産の合計が現在資産を超えています。調整値を確認してください。";
+          investmentAlert.hidden = false;
+        } else if (canForecast) {
+          const simulationContext = getSimulationContext();
           const initial = buildInitialCategories(summaryBreakdown, currentAssets);
           const categories = {
             cash: initial.cash,
@@ -3268,11 +3623,11 @@ function render() {
             points: initial.points,
             other: initial.other,
           };
-          const rows = simulateAnnualSeries({
+          negativeRow = findNegativeCashMonthDetailed({
             startDate: today,
             monthsRemaining,
             annualRate,
-            categoryRates: getSimulationContext()?.categoryRates,
+            categoryRates: simulationContext?.categoryRates,
             retirementAge: monthIndex(retirementDate),
             retirementIncomeEndAge: monthIndex(retirementIncomeEndDate),
             monthlyNetCash,
@@ -3280,27 +3635,26 @@ function render() {
             postRetirementMonthlyNetCash,
             contributionSchedule,
             categories,
-            bondMaturities: getSimulationContext()?.bondMaturities,
-            usdRate: getSimulationContext()?.usdRate,
+            bondMaturities: simulationContext?.bondMaturities,
+            usdRate: simulationContext?.usdRate,
             insuranceContributionSchedule:
-              getSimulationContext()?.insuranceContributionSchedule,
-            pensionPlanState: getSimulationContext()?.pensionPlanState,
+              simulationContext?.insuranceContributionSchedule,
+            pensionPlanState: simulationContext?.pensionPlanState,
           });
-          negativeRow = rows.find((row) => row.cash < 0);
         }
         if (warningCashNow < 0) {
           investmentAlert.textContent =
-            "現金残高がマイナスです。投資額を減らすか収入を増やしてください。";
+            "エラー：現在の現金残高がマイナスです。投資額を減らすか、現在資産を増やしてください。";
           investmentAlert.hidden = false;
         } else if (negativeRow && birthDate) {
           const ageMonths = fullMonthsBetween(birthDate, negativeRow.date);
           const ageYears = Math.floor(ageMonths / 12);
           const ageRemain = ageMonths % 12;
-          investmentAlert.textContent = `将来、現金残高がマイナスになります（${ageYears}歳${ageRemain}か月）。投資額を減らすか収入を増やしてください。`;
+          investmentAlert.textContent = `警告：将来、現金残高がマイナスになります（${ageYears}歳${ageRemain}か月）。投資額を減らすか収入を増やしてください。`;
           investmentAlert.hidden = false;
         } else if (warningCashAfter < 0) {
           investmentAlert.textContent =
-            "積立後の現金残高がマイナスです。積立額を訂正してください。";
+            "警告：積立後の現金残高がマイナスです。積立額を訂正してください。";
           investmentAlert.hidden = false;
         } else {
           investmentAlert.hidden = true;
@@ -3310,8 +3664,12 @@ function render() {
       investmentTotal.textContent = "-";
       cashBalance.textContent = "-";
       investmentContribTotal.textContent = "-";
-      investmentAfter.textContent = "-";
-      cashAfter.textContent = "-";
+      if (investmentAfter) {
+        investmentAfter.textContent = "-";
+      }
+      if (cashAfter) {
+        cashAfter.textContent = "-";
+      }
       if (investmentAlert) {
         investmentAlert.hidden = true;
       }
