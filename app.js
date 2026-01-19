@@ -2326,11 +2326,18 @@ if (exportSyncFolderButton) {
 }
 if (importSyncFileButton && syncFileInput) {
   importSyncFileButton.addEventListener("click", () => {
+    syncFileInput.value = "";
     syncFileInput.click();
+    if (syncStatus) {
+      syncStatus.textContent = "ファイルを選択してください";
+    }
   });
   syncFileInput.addEventListener("change", () => {
     const file = syncFileInput.files ? syncFileInput.files[0] : null;
     if (!file) {
+      if (syncStatus) {
+        syncStatus.textContent = "ファイルの選択がキャンセルされました";
+      }
       return;
     }
     const reader = new FileReader();
@@ -2338,12 +2345,21 @@ if (importSyncFileButton && syncFileInput) {
       const text = typeof reader.result === "string" ? reader.result : "";
       if (!text) {
         window.alert("ファイルの読み込みに失敗しました。");
+        if (syncStatus) {
+          syncStatus.textContent = "読み込みに失敗しました";
+        }
         return;
+      }
+      if (syncStatus) {
+        syncStatus.textContent = "復元を実行中...";
       }
       importSyncPayload(text);
     };
     reader.onerror = () => {
       window.alert("ファイルの読み込みに失敗しました。");
+      if (syncStatus) {
+        syncStatus.textContent = "読み込みに失敗しました";
+      }
     };
     reader.readAsText(file);
   });
