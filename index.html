@@ -14,9 +14,9 @@
       <p class="subtext">月次の運用と収支を反映します。</p>
       <nav class="page-tabs" aria-label="パラメーター選択">
         <button class="tab-button is-active" type="button" data-page="core">基本</button>
-        <button class="tab-button" type="button" data-page="import">インポート</button>
-        <button class="tab-button" type="button" data-page="cashflow">現役の支出・収入</button>
-        <button class="tab-button" type="button" data-page="retire-cashflow">定年後の支出・収入</button>
+        <button class="tab-button" type="button" data-page="import">データ更新</button>
+        <button class="tab-button" type="button" data-page="cashflow">現役の収入・支出</button>
+        <button class="tab-button" type="button" data-page="retire-cashflow">定年後の収入・支出</button>
         <button class="tab-button" type="button" data-page="investment">投資</button>
         <button class="tab-button" type="button" data-page="bond-input">債券入力</button>
       </nav>
@@ -33,7 +33,6 @@
           現在の資産総額（円）
           <input id="currentAssets" type="number" min="0" step="10000" value="15000000" required>
         </label>
-        <button id="applyImport" type="button">貼り付けデータで資産更新</button>
         <button id="exportCsv" type="button">年次CSVをダウンロード</button>
         <div class="export-panel">
           <label>
@@ -57,7 +56,7 @@
       </section>
 
       <section class="card import page" data-page="import">
-        <h2>データ取り込み（任意）</h2>
+        <h2>マネーフォワード取り込み</h2>
         <label>
           資産一覧（表データを貼り付け）
           <textarea id="assetData" rows="6" placeholder="資産区分\t大分類\t...\t金額(円)\t..."></textarea>
@@ -66,6 +65,7 @@
           資産推移（月次など）（表データを貼り付け）
           <textarea id="summaryData" rows="4" placeholder="日付\t合計（円）\t..."></textarea>
         </label>
+        <button id="applyImport" type="button">マネーフォワード取り込み</button>
         <div class="sync-panel">
           <h3>入力データのバックアップ</h3>
           <p class="helper-text">PCのフォルダーに保存/復元します。</p>
@@ -468,7 +468,10 @@
             <tbody id="bondTableBody"></tbody>
           </table>
         </div>
-        <button id="addBondRow" type="button">債券を追加</button>
+        <div class="bond-actions">
+          <button id="addBondRow" type="button">債券を追加</button>
+          <button id="sortBondRows" type="button">償還日順に更新</button>
+        </div>
       </section>
     </main>
     <footer class="update-footer">

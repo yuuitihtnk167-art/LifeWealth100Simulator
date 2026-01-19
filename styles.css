@@ -427,6 +427,12 @@ button:hover {
   gap: 12px;
 }
 
+.bond-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .bond-average {
   font-size: 13px;
   color: var(--muted);

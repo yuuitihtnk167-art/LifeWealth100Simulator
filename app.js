@@ -16,6 +16,7 @@ const exportProfitLossDecadeButton = document.getElementById(
 );
 const bondTableBody = document.getElementById("bondTableBody");
 const addBondRowButton = document.getElementById("addBondRow");
+const sortBondRowsButton = document.getElementById("sortBondRows");
 const bondAverageRate = document.getElementById("bondAverageRate");
 const importStatus = document.getElementById("importStatus");
 const exportSyncFolderButton = document.getElementById("exportSyncFolder");
@@ -1197,6 +1198,41 @@ function loadBondRows() {
   }
 }
 
+function sortBondRowsByMaturity() {
+  if (!bondTableBody) {
+    return;
+  }
+  const rows = Array.from(bondTableBody.querySelectorAll("tr")).map(
+    (row, index) => {
+      const data = {};
+      row.querySelectorAll("input, select").forEach((input) => {
+        data[input.dataset.key] = input.value;
+      });
+      return { data, index };
+    }
+  );
+  if (!rows.length) {
+    return;
+  }
+  rows.sort((a, b) => {
+    const dateA = parseDate(a.data.maturityDate);
+    const dateB = parseDate(b.data.maturityDate);
+    if (dateA && dateB) {
+      return dateA.getTime() - dateB.getTime();
+    }
+    if (dateA) {
+      return -1;
+    }
+    if (dateB) {
+      return 1;
+    }
+    return a.index - b.index;
+  });
+  bondTableBody.innerHTML = "";
+  rows.forEach(({ data }) => createBondRow(data));
+  persistBondRows();
+}
+
 function updateBondAverageRate() {
   if (!bondTableBody || !bondAverageRate) {
     return;
@@ -2368,6 +2404,11 @@ if (addBondRowButton) {
   addBondRowButton.addEventListener("click", () => {
     createBondRow();
     persistBondRows();
+  });
+}
+if (sortBondRowsButton) {
+  sortBondRowsButton.addEventListener("click", () => {
+    sortBondRowsByMaturity();
   });
 }
 assetDataInput.addEventListener("input", markImportDirty);
