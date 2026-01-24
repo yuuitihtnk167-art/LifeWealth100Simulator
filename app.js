@@ -132,6 +132,7 @@ const BOND_STORAGE_KEY = "lifewealth100.bonds.v1";
 const INSURANCE_SCHEDULE_KEY = "lifewealth100.insurance.schedule.v1";
 const PENSION_PLANS_KEY = "lifewealth100.pension.plans.v1";
 const PENSION_CHANGES_KEY = "lifewealth100.pension.changes.v1";
+const PUSH_TIMESTAMP_KEY = "lifewealth100.lastPushTimestamp.v1";
 const persistInputs = Array.from(document.querySelectorAll("input, textarea")).filter(
   (el) =>
     el.type !== "button" &&
@@ -1442,6 +1443,76 @@ function formatDateTime(date) {
   const minutes = String(date.getMinutes()).padStart(2, "0");
   const seconds = String(date.getSeconds()).padStart(2, "0");
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
+function getGitHubRepoFromLocation() {
+  if (!window.location || !window.location.hostname) {
+    return null;
+  }
+  const host = window.location.hostname;
+  if (!host.endsWith("github.io")) {
+    return null;
+  }
+  const owner = host.split(".")[0];
+  const pathParts = window.location.pathname.split("/").filter(Boolean);
+  const repo = pathParts[0];
+  if (!owner || !repo) {
+    return null;
+  }
+  return { owner, repo };
+}
+
+function setLastUpdatedText(date) {
+  if (!lastUpdated) {
+    return;
+  }
+  lastUpdated.textContent = date ? `更新日時: ${formatDateTime(date)}` : "更新日時: -";
+}
+
+function fetchLastPushTimestamp() {
+  const repo = getGitHubRepoFromLocation();
+  if (!repo) {
+    return Promise.resolve(null);
+  }
+  const url = `https://api.github.com/repos/${repo.owner}/${repo.repo}/commits/main`;
+  return fetch(url)
+    .then((response) => (response.ok ? response.json() : null))
+    .then((data) => {
+      const rawDate =
+        data?.commit?.committer?.date || data?.commit?.author?.date || null;
+      if (!rawDate) {
+        return null;
+      }
+      const parsed = new Date(rawDate);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    })
+    .catch(() => null);
+}
+
+function updateLastUpdatedFromPush() {
+  const cached = safeParseJson(localStorage.getItem(PUSH_TIMESTAMP_KEY), null);
+  if (cached && cached.value) {
+    const cachedDate = new Date(cached.value);
+    if (!Number.isNaN(cachedDate.getTime())) {
+      setLastUpdatedText(cachedDate);
+    }
+  } else {
+    setLastUpdatedText(null);
+  }
+  fetchLastPushTimestamp().then((date) => {
+    if (!date) {
+      return;
+    }
+    setLastUpdatedText(date);
+    try {
+      localStorage.setItem(
+        PUSH_TIMESTAMP_KEY,
+        JSON.stringify({ value: date.toISOString() })
+      );
+    } catch {
+      // Ignore storage failures.
+    }
+  });
 }
 
 function toCsvNumber(value) {
@@ -3525,10 +3596,6 @@ function handleExportProfitLossDecade() {
 }
 
 function render() {
-  if (lastUpdated) {
-    lastUpdated.textContent = `更新日時: ${formatDateTime(new Date())}`;
-  }
-
   const birthDate = parseDate(birthDateInput.value);
   const currentAssets = parseNumber(currentAssetsInput.value);
   const annualRatePercent = 0;
@@ -3969,6 +4036,7 @@ loadInsuranceScheduleRows();
 loadPensionPlanRows();
 loadPensionChangeRows();
 render();
+updateLastUpdatedFromPush();
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
