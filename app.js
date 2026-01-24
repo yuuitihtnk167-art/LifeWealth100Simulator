@@ -2712,6 +2712,33 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function getInsuranceScheduleSnapshot() {
+  if (insuranceScheduleBody) {
+    return Array.from(insuranceScheduleBody.querySelectorAll("tr")).map((row) =>
+      serializeInsuranceScheduleRow(row)
+    );
+  }
+  return readInsuranceSchedule();
+}
+
+function getPensionPlanSnapshot() {
+  if (pensionPlanBody) {
+    return Array.from(pensionPlanBody.querySelectorAll("tr")).map((row) =>
+      serializePensionPlanRow(row)
+    );
+  }
+  return readPensionPlans();
+}
+
+function getPensionChangeSnapshot() {
+  if (pensionChangeBody) {
+    return Array.from(pensionChangeBody.querySelectorAll("tr")).map((row) =>
+      serializePensionChangeRow(row)
+    );
+  }
+  return readPensionChanges();
+}
+
 function buildSyncPayload() {
   persistInputsToStorage();
   persistBondRows();
@@ -2720,9 +2747,9 @@ function buildSyncPayload() {
   persistPensionChangeRows();
   const inputs = safeParseJson(localStorage.getItem(STORAGE_KEY), {});
   const bonds = readBondStorage();
-  const insuranceSchedule = readInsuranceSchedule();
-  const pensionPlans = readPensionPlans();
-  const pensionChanges = readPensionChanges();
+  const insuranceSchedule = getInsuranceScheduleSnapshot();
+  const pensionPlans = getPensionPlanSnapshot();
+  const pensionChanges = getPensionChangeSnapshot();
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
