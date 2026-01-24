@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LifeWealth 100 Simulator</title>
+  <meta name="theme-color" content="#f4f0e6">
+  <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -36,14 +38,16 @@
         <button id="exportCsv" type="button">年次CSVをダウンロード</button>
         <div class="export-panel">
           <label>
-            年度
-            <select id="statementYear"></select>
+            開始年
+            <select id="statementYearFrom"></select>
+          </label>
+          <label>
+            終了年
+            <select id="statementYearTo"></select>
           </label>
           <div class="export-actions">
-            <button id="exportBalanceSheet" type="button">年次貸借対照表CSV</button>
-            <button id="exportProfitLoss" type="button">年次損益計算書CSV</button>
-            <button id="exportBalanceSheetDecade" type="button">10年単位貸借対照表CSV</button>
-            <button id="exportProfitLossDecade" type="button">10年単位損益計算書CSV</button>
+            <button id="exportBalanceSheetDecade" type="button">期間指定貸借対照表CSV</button>
+            <button id="exportProfitLossDecade" type="button">期間指定損益計算書CSV</button>
           </div>
         </div>
         <p class="import-status" id="importStatus">未取り込み</p>

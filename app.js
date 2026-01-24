@@ -34,9 +34,8 @@ const assetDataInput = document.getElementById("assetData");
 const summaryDataInput = document.getElementById("summaryData");
 const importButton = document.getElementById("applyImport");
 const exportButton = document.getElementById("exportCsv");
-const statementYearSelect = document.getElementById("statementYear");
-const exportBalanceSheetButton = document.getElementById("exportBalanceSheet");
-const exportProfitLossButton = document.getElementById("exportProfitLoss");
+const statementYearFromSelect = document.getElementById("statementYearFrom");
+const statementYearToSelect = document.getElementById("statementYearTo");
 const exportBalanceSheetDecadeButton = document.getElementById(
   "exportBalanceSheetDecade"
 );
@@ -709,6 +708,7 @@ function findNegativeCashMonthDetailed({
 
   for (let i = 0; i < totalMonths; i += 1) {
     const monthIndexValue = startMonthIndex + i;
+    const monthDate = addMonths(startDate, i);
     let cashFlow = monthlyNetCash;
     if (monthIndexValue >= retirementAge) {
       cashFlow = retirementMonthlyNetCash;
@@ -793,6 +793,7 @@ function simulateAnnualSeries({
 
   for (let i = 0; i < totalMonths; i += 1) {
     const monthIndexValue = startMonthIndex + i;
+    const monthDate = addMonths(startDate, i);
     let cashFlow = monthlyNetCash;
     if (monthIndexValue >= retirementAge) {
       cashFlow = retirementMonthlyNetCash;
@@ -830,7 +831,7 @@ function simulateAnnualSeries({
     applyBondMaturities(data, maturitySchedule, monthIndexValue);
     applyPensionPlanFlow(data, monthIndexValue, planState);
 
-    const isYearEnd = (i + 1) % 12 === 0;
+    const isYearEnd = monthDate.getMonth() === 11;
     const isFinal = i === totalMonths - 1;
     if (isYearEnd || isFinal) {
       const date = addMonths(startDate, i + 1);
@@ -1390,6 +1391,10 @@ function formatDate(date) {
   return `${year}-${month}-${day}`;
 }
 
+function getMonthStart(date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
 function formatAgeYears(birthDate, atDate) {
   if (!birthDate || !atDate) {
     return "-";
@@ -1454,10 +1459,11 @@ function csvCellWithFormula(value, expression) {
   return escapeCsvCell(`${toCsvNumber(value)}\n=${expression}`);
 }
 
-function downloadCsv(rows, birthDate) {
+function downloadCsv(rows, birthDate, options = {}) {
+  const todayRow = options.todayRow ?? null;
   const header =
     "日付,年齢,合計（円）,預金・現金・暗号資産（円）,株式(現物)（円）,投資信託（円）,債券（円）,保険（円）,年金（円）,ポイント（円）,その他の資産（円）";
-  const lines = rows.map((row) =>
+  const buildLine = (row) =>
     [
       formatDate(row.date),
       formatAgeYears(birthDate, row.date),
@@ -1470,8 +1476,12 @@ function downloadCsv(rows, birthDate) {
       toCsvNumber(row.dc || 0),
       toCsvNumber(row.points),
       toCsvNumber(row.other),
-    ].join(",")
-  );
+    ].join(",");
+  const lines = [];
+  if (todayRow) {
+    lines.push(buildLine(todayRow));
+  }
+  rows.forEach((row) => lines.push(buildLine(row)));
   const csv = [header, ...lines].join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
@@ -2941,9 +2951,14 @@ function handleExportCsv() {
     return;
   }
 
+  const annualStartDate = getMonthStart(context.today);
+  const annualMonthsRemaining = fullMonthsBetween(
+    annualStartDate,
+    addYears(context.birthDate, 100)
+  );
   const rows = simulateAnnualSeries({
-    startDate: context.today,
-    monthsRemaining: context.monthsRemaining,
+    startDate: annualStartDate,
+    monthsRemaining: annualMonthsRemaining,
     annualRate: context.annualRate,
     categoryRates: context.categoryRates,
     retirementAge: context.retirementMonthIndex,
@@ -2968,7 +2983,12 @@ function handleExportCsv() {
     return;
   }
 
-  downloadCsv(rows, context.birthDate);
+  const todaySnapshot = {
+    date: context.today,
+    total: sumCategoryTotal(context.categories),
+    ...context.categories,
+  };
+  downloadCsv(rows, context.birthDate, { todayRow: todaySnapshot });
 }
 
 function getSimulationContext() {
@@ -3141,23 +3161,23 @@ function buildStatementRows({ showAlert }) {
 }
 
 function updateStatementYearOptions(statementRows) {
-  if (!statementYearSelect) {
+  if (!statementYearFromSelect || !statementYearToSelect) {
     return;
   }
-  statementYearSelect.innerHTML = "";
+  statementYearFromSelect.innerHTML = "";
+  statementYearToSelect.innerHTML = "";
 
   if (!statementRows || statementRows.length === 0) {
     const option = document.createElement("option");
     option.value = "";
     option.textContent = "選択できません";
-    statementYearSelect.appendChild(option);
-    statementYearSelect.disabled = true;
-    if (exportBalanceSheetButton) {
-      exportBalanceSheetButton.disabled = true;
-    }
-    if (exportProfitLossButton) {
-      exportProfitLossButton.disabled = true;
-    }
+    statementYearFromSelect.appendChild(option);
+    statementYearFromSelect.disabled = true;
+    const optionTo = document.createElement("option");
+    optionTo.value = "";
+    optionTo.textContent = "選択できません";
+    statementYearToSelect.appendChild(optionTo);
+    statementYearToSelect.disabled = true;
     if (exportBalanceSheetDecadeButton) {
       exportBalanceSheetDecadeButton.disabled = true;
     }
@@ -3167,43 +3187,30 @@ function updateStatementYearOptions(statementRows) {
     return;
   }
 
-  const selectedYear = parseNumber(statementYearSelect.value);
-  const currentYear = new Date().getFullYear();
-  const sortedRows = [...statementRows].sort((a, b) => b.year - a.year);
-  let currentRowIndex = sortedRows.findIndex((row) => row.year === currentYear);
-  if (currentRowIndex === -1) {
-    let closestIndex = 0;
-    let closestDiff = Infinity;
-    sortedRows.forEach((row, index) => {
-      const diff = Math.abs(row.year - currentYear);
-      if (diff < closestDiff) {
-        closestDiff = diff;
-        closestIndex = index;
-      }
-    });
-    currentRowIndex = closestIndex;
-  }
-  if (currentRowIndex > 0) {
-    const [currentRow] = sortedRows.splice(currentRowIndex, 1);
-    sortedRows.unshift(currentRow);
-  }
+  const sortedRows = [...statementRows].sort((a, b) => a.year - b.year);
   sortedRows.forEach((row) => {
-    const option = document.createElement("option");
-    option.value = row.year;
-    option.textContent =
-      row.months < 12 ? `${row.year}年（${row.months}か月）` : `${row.year}年`;
-    statementYearSelect.appendChild(option);
+    const optionFrom = document.createElement("option");
+    optionFrom.value = row.year;
+    optionFrom.textContent = `${row.year}年`;
+    statementYearFromSelect.appendChild(optionFrom);
+    const optionTo = document.createElement("option");
+    optionTo.value = row.year;
+    optionTo.textContent = optionFrom.textContent;
+    statementYearToSelect.appendChild(optionTo);
   });
-  const matched = sortedRows.find((row) => row.year === selectedYear);
-  const fallbackYear = sortedRows[0].year;
-  statementYearSelect.value = String(matched ? matched.year : fallbackYear);
-  statementYearSelect.disabled = false;
-  if (exportBalanceSheetButton) {
-    exportBalanceSheetButton.disabled = false;
-  }
-  if (exportProfitLossButton) {
-    exportProfitLossButton.disabled = false;
-  }
+  const selectedFrom = parseNumber(statementYearFromSelect.value);
+  const selectedTo = parseNumber(statementYearToSelect.value);
+  const fallbackYear = sortedRows[sortedRows.length - 1].year;
+  const matchedFrom = sortedRows.find((row) => row.year === selectedFrom);
+  const matchedTo = sortedRows.find((row) => row.year === selectedTo);
+  statementYearFromSelect.value = String(
+    matchedFrom ? matchedFrom.year : fallbackYear
+  );
+  statementYearToSelect.value = String(
+    matchedTo ? matchedTo.year : statementYearFromSelect.value
+  );
+  statementYearFromSelect.disabled = false;
+  statementYearToSelect.disabled = false;
   if (exportBalanceSheetDecadeButton) {
     exportBalanceSheetDecadeButton.disabled = false;
   }
@@ -3399,59 +3406,38 @@ function buildProfitLossCsvLine(row, birthDate) {
   ].join(",");
 }
 
-function getStatementRow(statementRows) {
+function getSelectedYearRange(statementRows) {
   if (!statementRows || statementRows.length === 0) {
     return null;
   }
-  const selectedYear = parseNumber(statementYearSelect?.value);
-  if (selectedYear === null) {
-    return statementRows[statementRows.length - 1];
+  const years = statementRows.map((row) => row.year);
+  const maxYear = Math.max(...years);
+  const minYear = Math.min(...years);
+  const selectedFrom = parseNumber(statementYearFromSelect?.value);
+  const selectedTo = parseNumber(statementYearToSelect?.value);
+  let startYear = selectedFrom ?? maxYear;
+  let endYear = selectedTo ?? startYear;
+  if (!Number.isFinite(startYear)) {
+    startYear = maxYear;
   }
-  return statementRows.find((row) => row.year === selectedYear) ??
-    statementRows[statementRows.length - 1];
+  if (!Number.isFinite(endYear)) {
+    endYear = startYear;
+  }
+  startYear = Math.min(Math.max(startYear, minYear), maxYear);
+  endYear = Math.min(Math.max(endYear, minYear), maxYear);
+  if (startYear > endYear) {
+    [startYear, endYear] = [endYear, startYear];
+  }
+  return { startYear, endYear };
 }
 
-function getDecadeRows(statementRows) {
+function getStatementRowsInRange(statementRows, startYear, endYear) {
   if (!statementRows || statementRows.length === 0) {
     return [];
   }
-  const selectedYear = parseNumber(statementYearSelect?.value);
-  const startYear =
-    selectedYear !== null ? selectedYear : statementRows[0].year;
-  const endYear = startYear + 10;
   return statementRows.filter(
-    (row) => row.year >= startYear && row.year < endYear
+    (row) => row.year >= startYear && row.year <= endYear
   );
-}
-
-function handleExportBalanceSheet() {
-  const statementRows = buildStatementRows({ showAlert: true });
-  if (!statementRows) {
-    return;
-  }
-  const row = getStatementRow(statementRows);
-  if (!row) {
-    window.alert("対象年度のデータがありません。");
-    return;
-  }
-  const birthDate = parseDate(birthDateInput.value);
-  const csv = buildBalanceSheetCsv(row, birthDate);
-  downloadCsvText(csv, `LifeWealth100_balance_sheet_${row.year}.csv`);
-}
-
-function handleExportProfitLoss() {
-  const statementRows = buildStatementRows({ showAlert: true });
-  if (!statementRows) {
-    return;
-  }
-  const row = getStatementRow(statementRows);
-  if (!row) {
-    window.alert("対象年度のデータがありません。");
-    return;
-  }
-  const birthDate = parseDate(birthDateInput.value);
-  const csv = buildProfitLossCsv(row, birthDate);
-  downloadCsvText(csv, `LifeWealth100_profit_loss_${row.year}.csv`);
 }
 
 function handleExportBalanceSheetDecade() {
@@ -3459,19 +3445,28 @@ function handleExportBalanceSheetDecade() {
   if (!statementRows) {
     return;
   }
-  const decadeRows = getDecadeRows(statementRows);
-  if (!decadeRows.length) {
-    window.alert("対象の10年データがありません。");
+  const range = getSelectedYearRange(statementRows);
+  if (!range) {
+    window.alert("対象年度のデータがありません。");
+    return;
+  }
+  const rangeRows = getStatementRowsInRange(
+    statementRows,
+    range.startYear,
+    range.endYear
+  );
+  if (!rangeRows.length) {
+    window.alert("対象の期間データがありません。");
     return;
   }
   const header =
     "年度,年齢,対象月数,期首合計（円）,期首預金・現金・暗号資産（円）,期首株式(現物)（円）,期首投資信託（円）,期首債券（円）,期首保険（円）,期首年金（円）,期首ポイント（円）,期首その他の資産（円）,期末合計（円）,期末預金・現金・暗号資産（円）,期末株式(現物)（円）,期末投資信託（円）,期末債券（円）,期末保険（円）,期末年金（円）,期末ポイント（円）,期末その他の資産（円）";
   const birthDate = parseDate(birthDateInput.value);
-  const lines = decadeRows.map((row) => buildBalanceSheetCsvLine(row, birthDate));
+  const lines = rangeRows.map((row) => buildBalanceSheetCsvLine(row, birthDate));
   const csv = [header, ...lines].join("\n");
   downloadCsvText(
     csv,
-    `LifeWealth100_balance_sheet_${decadeRows[0].year}_to_${decadeRows[decadeRows.length - 1].year}.csv`
+    `LifeWealth100_balance_sheet_${rangeRows[0].year}_to_${rangeRows[rangeRows.length - 1].year}.csv`
   );
 }
 
@@ -3480,19 +3475,28 @@ function handleExportProfitLossDecade() {
   if (!statementRows) {
     return;
   }
-  const decadeRows = getDecadeRows(statementRows);
-  if (!decadeRows.length) {
-    window.alert("対象の10年データがありません。");
+  const range = getSelectedYearRange(statementRows);
+  if (!range) {
+    window.alert("対象年度のデータがありません。");
+    return;
+  }
+  const rangeRows = getStatementRowsInRange(
+    statementRows,
+    range.startYear,
+    range.endYear
+  );
+  if (!rangeRows.length) {
+    window.alert("対象の期間データがありません。");
     return;
   }
   const header =
     "年度,年齢,対象月数,収入（円）,支出（円）,収支（円）,運用益（円）,資産増減（円）,期首合計（円）,期末合計（円）";
   const birthDate = parseDate(birthDateInput.value);
-  const lines = decadeRows.map((row) => buildProfitLossCsvLine(row, birthDate));
+  const lines = rangeRows.map((row) => buildProfitLossCsvLine(row, birthDate));
   const csv = [header, ...lines].join("\n");
   downloadCsvText(
     csv,
-    `LifeWealth100_profit_loss_${decadeRows[0].year}_to_${decadeRows[decadeRows.length - 1].year}.csv`
+    `LifeWealth100_profit_loss_${rangeRows[0].year}_to_${rangeRows[rangeRows.length - 1].year}.csv`
   );
 }
 
@@ -3831,12 +3835,6 @@ importButton.addEventListener("click", applyImportedData);
 if (exportButton) {
   exportButton.addEventListener("click", handleExportCsv);
 }
-if (exportBalanceSheetButton) {
-  exportBalanceSheetButton.addEventListener("click", handleExportBalanceSheet);
-}
-if (exportProfitLossButton) {
-  exportProfitLossButton.addEventListener("click", handleExportProfitLoss);
-}
 if (exportBalanceSheetDecadeButton) {
   exportBalanceSheetDecadeButton.addEventListener(
     "click",
@@ -3946,6 +3944,14 @@ loadInsuranceScheduleRows();
 loadPensionPlanRows();
 loadPensionChangeRows();
 render();
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {
+      // Ignore service worker registration failures.
+    });
+  });
+}
 
 function setActivePage(pageId) {
   pages.forEach((page) => {

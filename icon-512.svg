@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="LifeWealth 100 Simulator icon">
+  <rect width="512" height="512" rx="88" fill="#f4f0e6"/>
+  <rect x="48" y="48" width="416" height="416" rx="64" fill="#1f1f1f"/>
+  <g fill="#f4f0e6" font-family="Georgia, 'Times New Roman', serif" font-weight="700">
+    <text x="256" y="258" font-size="140" text-anchor="middle">LW</text>
+    <text x="256" y="352" font-size="88" text-anchor="middle">100</text>
+  </g>
+</svg>
