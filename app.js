@@ -1403,6 +1403,30 @@ function formatAgeYears(birthDate, atDate) {
   return Math.floor(months / 12);
 }
 
+function updateRetireExpensePlaceholders() {
+  const baseByKey = new Map();
+  expenseInputs.forEach((input) => {
+    const key = input.dataset.expenseKey;
+    if (!key) {
+      return;
+    }
+    const value = parseNumber(input.value);
+    baseByKey.set(key, value);
+  });
+  retireExpenseInputs.forEach((input) => {
+    const key = input.dataset.expenseKey;
+    if (!key) {
+      return;
+    }
+    const baseValue = baseByKey.get(key);
+    const placeholderValue =
+      Number.isFinite(baseValue) && baseValue > 0 ? String(Math.round(baseValue)) : "";
+    if (input.placeholder !== placeholderValue) {
+      input.placeholder = placeholderValue;
+    }
+  });
+}
+
 function getPeriodStartDate(periodEndDate, months) {
   if (!periodEndDate || !Number.isFinite(months)) {
     return null;
@@ -3763,6 +3787,7 @@ function render() {
   monthlyPensionIncome.textContent = yenFormatter.format(
     Math.round(pensionIncomeTotal)
   );
+  updateRetireExpensePlaceholders();
 
   // Investment summary is handled before the main validation.
 

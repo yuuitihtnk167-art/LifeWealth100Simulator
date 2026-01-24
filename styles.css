@@ -136,6 +136,10 @@ textarea {
   background: #fff;
 }
 
+.retire-expense-input::placeholder {
+  color: rgba(110, 95, 75, 0.45);
+}
+
 textarea {
   resize: vertical;
 }
