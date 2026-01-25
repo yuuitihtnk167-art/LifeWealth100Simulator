@@ -373,13 +373,10 @@
               <input id="adjustBonds" type="number" step="1000" inputmode="numeric">
             </label>
             <label>
-              積立（月額）
-              <input id="contribBonds" type="number" min="0" step="1000" inputmode="numeric">
-            </label>
-            <label>
-              想定利回り（年率 %）
+              平均利率（年率 %）
               <input id="rateBonds" type="number" min="-100" max="100" step="0.1" inputmode="numeric">
             </label>
+            <div class="bond-rate-average" id="bondRateAverageDisplay">平均利率: -</div>
             <button id="bondDetailButton" type="button">債券入力</button>
           </div>
           <div class="investment-item">
@@ -456,6 +453,7 @@
             <thead>
               <tr>
                 <th>銘柄名</th>
+                <th>現金</th>
                 <th>通貨</th>
                 <th>保有額面</th>
                 <th>所得単価</th>
@@ -470,6 +468,7 @@
         <div class="bond-actions">
           <button id="addBondRow" type="button">債券を追加</button>
           <button id="sortBondRows" type="button">償還日順に更新</button>
+          <span class="bond-total" id="bondTotalAmount">合計: -</span>
         </div>
         <div class="bond-matured">
           <h3>償還済み</h3>

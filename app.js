@@ -48,6 +48,7 @@ const addBondRowButton = document.getElementById("addBondRow");
 const sortBondRowsButton = document.getElementById("sortBondRows");
 const bondAverageRate = document.getElementById("bondAverageRate");
 const bondUsdRateInput = document.getElementById("bondUsdRate");
+const bondTotalAmount = document.getElementById("bondTotalAmount");
 const importStatus = document.getElementById("importStatus");
 const exportSyncFolderButton = document.getElementById("exportSyncFolder");
 const importSyncFileButton = document.getElementById("importSyncFile");
@@ -108,6 +109,14 @@ if (contribInsuranceInput) {
   contribInsuranceInput.disabled = true;
   contribInsuranceInput.title = "保険料詳細で設定してください";
 }
+if (balanceBondsInput) {
+  balanceBondsInput.disabled = true;
+  balanceBondsInput.title = "債券入力の保有額面から自動計算されます";
+}
+if (rateBondsInput) {
+  rateBondsInput.disabled = true;
+  rateBondsInput.title = "債券入力の利率平均が自動表示されます";
+}
 const investmentTotal = document.getElementById("investmentTotal");
 const cashBalance = document.getElementById("cashBalance");
 const investmentContribTotal = document.getElementById("investmentContribTotal");
@@ -115,6 +124,7 @@ const investmentAfter = document.getElementById("investmentAfter");
 const cashAfter = document.getElementById("cashAfter");
 const investmentAlert = document.getElementById("investmentAlert");
 const bondDetailButton = document.getElementById("bondDetailButton");
+const bondRateAverageDisplay = document.getElementById("bondRateAverageDisplay");
 const insuranceDetailButton = document.getElementById("insuranceDetailButton");
 const insuranceCurrentAmount = document.getElementById("insuranceCurrentAmount");
 const insurancePlanBody = document.getElementById("insurancePlanBody");
@@ -1228,11 +1238,15 @@ function buildContributionSchedule(birthDate, options = {}) {
       amount: parseNumber(contribFundsInput.value) || 0,
       endMonthIndex: toEndMonth(endAgeFundsInput),
     },
-    {
-      category: "bonds",
-      amount: parseNumber(contribBondsInput.value) || 0,
-      endMonthIndex: toEndMonth(endAgeBondsInput),
-    },
+    ...(contribBondsInput
+      ? [
+          {
+            category: "bonds",
+            amount: parseNumber(contribBondsInput.value) || 0,
+            endMonthIndex: toEndMonth(endAgeBondsInput),
+          },
+        ]
+      : []),
     ...(insuranceItems.length
       ? insuranceItems
       : [
@@ -1338,15 +1352,24 @@ function buildInitialCategories(summaryBreakdown, currentAssets) {
     );
     const stocks = getAdjustedBalance(summaryBreakdown.stocks, adjustments.stocks);
     const funds = getAdjustedBalance(summaryBreakdown.funds, adjustments.funds);
-    const bonds = getAdjustedBalance(summaryBreakdown.bonds, adjustments.bonds);
+    const bondInputTotal = parseNumber(balanceBondsInput?.value);
+    const storedBonds = readBondStorage();
+    const usdRate =
+      parseNumber(bondUsdRateInput?.value ?? storedBonds.usdRate) ?? 0;
+    const bondReclass = getBondCashReclassTotalYen(storedBonds, usdRate);
+    const bondBase =
+      Number.isFinite(bondInputTotal) ? bondInputTotal : summaryBreakdown.bonds;
+    const bonds = getAdjustedBalance(bondBase, adjustments.bonds);
     const insurance = getAdjustedBalance(
       summaryBreakdown.insurance,
       adjustments.insurance
     );
     const points = summaryBreakdown.points || 0;
     const other = (summaryBreakdown.other || 0) + usdBalance;
-    const cashFromSummary =
+    const cashFromSummaryBase =
       Number.isFinite(summaryBreakdown.cash) ? summaryBreakdown.cash : null;
+    const cashFromSummary =
+      cashFromSummaryBase !== null ? cashFromSummaryBase - bondReclass : null;
     const investmentTotal = stocks + funds + bonds + insurance + dc + points + other;
     const derivedTotal =
       (cashFromSummary || 0) + investmentTotal;
@@ -2049,6 +2072,12 @@ function createBondRow(data = {}) {
   nameInput.classList.add("bond-name");
   nameInput.title = nameInput.value;
 
+  const cashCheck = document.createElement("input");
+  cashCheck.type = "checkbox";
+  cashCheck.dataset.key = "cash";
+  cashCheck.checked =
+    data.cash === true || data.cash === "true" || data.cash === "1";
+
   const currencySelect = document.createElement("select");
   currencySelect.dataset.key = "currency";
   ["JPY", "USD"].forEach((code) => {
@@ -2099,6 +2128,7 @@ function createBondRow(data = {}) {
 
   const cells = [
     nameInput,
+    cashCheck,
     currencySelect,
     faceValueInput,
     purchasePriceInput,
@@ -2120,18 +2150,23 @@ function createBondRow(data = {}) {
 
   [
     nameInput,
+    cashCheck,
     currencySelect,
     faceValueInput,
     purchasePriceInput,
     maturityDateInput,
     rateInput,
   ].forEach((input) => {
-    input.addEventListener("input", () => {
+    const handler = () => {
       if (input === nameInput) {
         nameInput.title = nameInput.value;
       }
       persistBondRows();
-    });
+    };
+    input.addEventListener("input", handler);
+    if (input.type === "checkbox") {
+      input.addEventListener("change", handler);
+    }
     if (input.tagName === "SELECT") {
       input.addEventListener("change", persistBondRows);
     }
@@ -2166,6 +2201,10 @@ function createMaturedBondRow(data = {}) {
 function serializeBondRow(row) {
   const data = {};
   row.querySelectorAll("input, select").forEach((input) => {
+    if (input.type === "checkbox") {
+      data[input.dataset.key] = input.checked;
+      return;
+    }
     data[input.dataset.key] = input.value;
   });
   return data;
@@ -2573,6 +2612,9 @@ function persistBondRows() {
   }
   writeBondStorage(stored);
   updateBondAverageRate();
+  updateBondBalanceFromStorage();
+  updateCurrentAssetsFromInvestmentBalances();
+  render();
 }
 
 function isBondMatured(data, today) {
@@ -2618,6 +2660,10 @@ function loadBondRows() {
       const next = readBondStorage();
       next.usdRate = bondUsdRateInput.value;
       writeBondStorage(next);
+      updateBondAverageRate();
+      updateBondBalanceFromStorage();
+      updateCurrentAssetsFromInvestmentBalances();
+      render();
     });
   }
   if (!stored.active.length) {
@@ -2630,6 +2676,7 @@ function loadBondRows() {
     writeBondStorage(stored);
   }
   updateBondAverageRate();
+  updateBondBalanceFromStorage();
 }
 
 function sortBondRowsByMaturity() {
@@ -2676,10 +2723,69 @@ function updateBondAverageRate() {
     .filter((value) => value !== null);
   if (!values.length) {
     bondAverageRate.textContent = "平均利率: -";
+    if (bondRateAverageDisplay) {
+      bondRateAverageDisplay.textContent = "平均利率: -";
+    }
+    if (rateBondsInput) {
+      rateBondsInput.value = "";
+    }
     return;
   }
   const avg = values.reduce((sum, value) => sum + value, 0) / values.length;
   bondAverageRate.textContent = `平均利率: ${percentFormatter.format(avg)}%`;
+  if (bondRateAverageDisplay) {
+    bondRateAverageDisplay.textContent = `平均利率: ${percentFormatter.format(avg)}%`;
+  }
+  if (rateBondsInput) {
+    rateBondsInput.value = String(Math.round(avg * 100) / 100);
+  }
+}
+
+function getBondFaceValueTotalYen(stored, usdRate) {
+  const active = stored?.active || [];
+  return active.reduce((sum, row) => {
+    const faceValue = parseNumber(row?.faceValue);
+    if (!Number.isFinite(faceValue) || faceValue <= 0) {
+      return sum;
+    }
+    const rate = row?.currency === "USD" ? usdRate : 1;
+    return sum + toYenAmount(faceValue * rate);
+  }, 0);
+}
+
+function getBondCashReclassTotalYen(stored, usdRate) {
+  const active = stored?.active || [];
+  return active.reduce((sum, row) => {
+    const isCash =
+      row?.cash === true || row?.cash === "true" || row?.cash === "1";
+    if (!isCash) {
+      return sum;
+    }
+    const faceValue = parseNumber(row?.faceValue);
+    if (!Number.isFinite(faceValue) || faceValue <= 0) {
+      return sum;
+    }
+    const rate = row?.currency === "USD" ? usdRate : 1;
+    return sum + toYenAmount(faceValue * rate);
+  }, 0);
+}
+
+function updateBondBalanceFromStorage() {
+  if (!balanceBondsInput && !bondTotalAmount) {
+    return;
+  }
+  const stored = readBondStorage();
+  const usdRate = parseNumber(bondUsdRateInput?.value ?? stored.usdRate) ?? 0;
+  const total = getBondFaceValueTotalYen(stored, usdRate);
+  const nextValue = String(Math.round(total));
+  if (balanceBondsInput && balanceBondsInput.value !== nextValue) {
+    balanceBondsInput.value = nextValue;
+  }
+  if (bondTotalAmount) {
+    bondTotalAmount.textContent = `合計: ${yenFormatter.format(
+      Math.round(total)
+    )}`;
+  }
 }
 
 function persistInputsToStorage() {
@@ -3651,6 +3757,7 @@ function render() {
   const ongoingIncome = (incomeMap.dividend || 0) + (incomeMap.other || 0);
   const retireIncomeTotal = retireBaseIncome;
   const today = new Date();
+  updateBondBalanceFromStorage();
   const insurancePlans = readInsurancePlans();
   syncInsuranceContributionFromDetail(insurancePlans, today);
   const pensionPlans = readPensionPlans();
@@ -3674,7 +3781,7 @@ function render() {
   const investmentContributionTotal =
     (parseNumber(contribStocksInput.value) || 0) +
     (parseNumber(contribFundsInput.value) || 0) +
-    (parseNumber(contribBondsInput.value) || 0) +
+    (parseNumber(contribBondsInput?.value) || 0) +
     (parseNumber(contribInsuranceInput.value) || 0) +
     (parseNumber(contribUsdInput.value) || 0) +
     (parseNumber(contribDcInput.value) || 0);
