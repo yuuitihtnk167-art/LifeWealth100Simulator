@@ -114,6 +114,7 @@ const investmentContribTotal = document.getElementById("investmentContribTotal")
 const investmentAfter = document.getElementById("investmentAfter");
 const cashAfter = document.getElementById("cashAfter");
 const investmentAlert = document.getElementById("investmentAlert");
+const bondDetailButton = document.getElementById("bondDetailButton");
 const insuranceDetailButton = document.getElementById("insuranceDetailButton");
 const insuranceCurrentAmount = document.getElementById("insuranceCurrentAmount");
 const insurancePlanBody = document.getElementById("insurancePlanBody");
@@ -1597,6 +1598,32 @@ function csvCellWithFormula(value, expression) {
   return escapeCsvCell(`${toCsvNumber(value)}\n=${expression}`);
 }
 
+async function saveCsvWithPicker(csv, filename) {
+  if (!window.showSaveFilePicker) {
+    window.alert("このブラウザは保存場所の指定に対応していません。");
+    return;
+  }
+  try {
+    const handle = await window.showSaveFilePicker({
+      suggestedName: filename,
+      types: [
+        {
+          description: "CSVファイル",
+          accept: { "text/csv": [".csv"] },
+        },
+      ],
+    });
+    const writable = await handle.createWritable();
+    await writable.write(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+    await writable.close();
+  } catch (error) {
+    if (error && error.name === "AbortError") {
+      return;
+    }
+    window.alert("ファイルの保存に失敗しました。");
+  }
+}
+
 function downloadCsv(rows, birthDate, options = {}) {
   const todayRow = options.todayRow ?? null;
   const header =
@@ -1621,27 +1648,11 @@ function downloadCsv(rows, birthDate, options = {}) {
   }
   rows.forEach((row) => lines.push(buildLine(row)));
   const csv = [header, ...lines].join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "LifeWealth100_annual.csv";
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  void saveCsvWithPicker(csv, "LifeWealth100_annual.csv");
 }
 
 function downloadCsvText(csv, filename) {
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  void saveCsvWithPicker(csv, filename);
 }
 
 function detectDelimiter(lines) {
@@ -4020,6 +4031,11 @@ if (addBondRowButton) {
 if (sortBondRowsButton) {
   sortBondRowsButton.addEventListener("click", () => {
     sortBondRowsByMaturity();
+  });
+}
+if (bondDetailButton) {
+  bondDetailButton.addEventListener("click", () => {
+    setActivePage("bond-input");
   });
 }
 if (insuranceDetailButton) {
