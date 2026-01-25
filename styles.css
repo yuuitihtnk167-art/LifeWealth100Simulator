@@ -348,7 +348,7 @@ button:hover {
   color: var(--accent);
 }
 
-.insurance-schedule {
+.insurance-plan {
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: auto;
@@ -356,13 +356,13 @@ button:hover {
   margin-bottom: 12px;
 }
 
-.insurance-schedule table {
+.insurance-plan table {
   width: 100%;
   border-collapse: collapse;
 }
 
-.insurance-schedule th,
-.insurance-schedule td {
+.insurance-plan th,
+.insurance-plan td {
   border-bottom: 1px solid var(--border);
   padding: 10px 12px;
   font-size: 13px;
@@ -370,36 +370,28 @@ button:hover {
   white-space: nowrap;
 }
 
-.insurance-schedule th {
+.insurance-plan th {
   background: #fbf8f2;
   color: var(--muted);
 }
 
-.insurance-schedule input {
-  width: 140px;
+.insurance-plan input {
+  width: 160px;
   padding: 8px 10px;
   font-size: 13px;
 }
 
-.insurance-schedule .insurance-action button {
+.insurance-plan td:nth-child(4) input {
+  width: 220px;
+}
+
+.insurance-plan .insurance-action button {
   background: transparent;
   color: var(--accent);
   border: 1px solid var(--accent);
   padding: 6px 10px;
   border-radius: 999px;
   font-size: 12px;
-}
-
-.insurance-future {
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px dashed var(--border);
-}
-
-.insurance-future h3 {
-  margin: 0 0 12px;
-  font-size: 14px;
-  color: var(--muted);
 }
 
 .pension-current {
