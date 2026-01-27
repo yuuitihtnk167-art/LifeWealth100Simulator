@@ -3324,19 +3324,22 @@ function getPensionChangeSnapshot() {
 function buildSyncPayload() {
   persistInputsToStorage();
   persistBondRows();
+  persistOtherAssetRows();
   persistInsurancePlanRows();
   persistPensionPlanRows();
   persistPensionChangeRows();
   const inputs = safeParseJson(localStorage.getItem(STORAGE_KEY), {});
   const bonds = readBondStorage();
+  const otherAssets = readOtherAssetsStorage();
   const insurancePlans = getInsurancePlanSnapshot();
   const pensionPlans = getPensionPlanSnapshot();
   const pensionChanges = getPensionChangeSnapshot();
   return {
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
     inputs,
     bonds,
+    otherAssets,
     insurancePlans,
     pensionPlans,
     pensionChanges,
@@ -3388,6 +3391,7 @@ function importSyncPayload(raw) {
   }
   const inputs = isPlainObject(data.inputs) ? data.inputs : null;
   const bonds = data.bonds ? normalizeBondStorage(data.bonds) : null;
+  const otherAssets = Array.isArray(data.otherAssets) ? data.otherAssets : null;
   const insurancePlans = Array.isArray(data.insurancePlans)
     ? data.insurancePlans
     : null;
@@ -3403,6 +3407,7 @@ function importSyncPayload(raw) {
   if (
     !inputs &&
     !bonds &&
+    !otherAssets &&
     !insurancePlans &&
     !insuranceScheduleLegacy &&
     !pensionPlans &&
@@ -3417,6 +3422,9 @@ function importSyncPayload(raw) {
     }
     if (bonds) {
       writeBondStorage(bonds);
+    }
+    if (otherAssets) {
+      writeOtherAssetsStorage(otherAssets);
     }
     if (insurancePlans) {
       writeInsurancePlans(insurancePlans);
@@ -3438,6 +3446,7 @@ function importSyncPayload(raw) {
   }
   loadPersistedInputs();
   loadBondRows();
+  loadOtherAssetRows();
   loadInsurancePlanRows();
   loadPensionPlanRows();
   loadPensionChangeRows();
