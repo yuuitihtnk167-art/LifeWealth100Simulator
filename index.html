@@ -19,7 +19,7 @@
         <button class="tab-button" type="button" data-page="import">データ更新</button>
         <button class="tab-button" type="button" data-page="cashflow">現役の収入・支出</button>
         <button class="tab-button" type="button" data-page="retire-cashflow">定年後の収入・支出</button>
-        <button class="tab-button" type="button" data-page="investment">投資</button>
+        <button class="tab-button" type="button" data-page="investment">資産残高一覧</button>
       </nav>
     </header>
 
@@ -298,7 +298,7 @@
       </section>
 
       <section class="card investment page" data-page="investment">
-        <h2>投資パラメーター</h2>
+        <h2>資産残高一覧</h2>
         <p class="helper-text">残高は資産一覧の貼り付けデータから集計されます。</p>
         <p class="alert-text" id="investmentAlert" hidden>投資合計が現金を超えています。積立額または投資残高を見直してください。</p>
         <div class="investment-summary">
@@ -309,6 +309,8 @@
           <div>
             <span>現金残高</span>
             <strong id="cashBalance">-</strong>
+            <span class="helper-text" id="cashDeduction">現金から引く: -</span>
+            <span class="helper-text" id="cashBaseDisplay">元の現金残高: -</span>
           </div>
           <div>
             <span>積立合計（月額）</span>
@@ -317,27 +319,46 @@
         </div>
         <div class="investment-grid">
           <div class="investment-item">
-            <h3>株式投資</h3>
+            <h3>現金</h3>
             <label>
               残高（円）
-              <input id="balanceStocks" type="number" min="0" step="1000" inputmode="numeric">
+              <input id="balanceCash" type="number" step="1000" inputmode="numeric">
             </label>
             <label>
               手動調整（円）
-              <input id="adjustStocks" type="number" step="1000" inputmode="numeric">
+              <input id="adjustCash" type="number" step="1000" inputmode="numeric">
+            </label>
+            <div class="asset-detail">
+              <label>
+                対象年
+                <select class="asset-year-select" data-asset-key="cash"></select>
+              </label>
+              <button class="asset-detail-button" type="button" data-asset-key="cash">月次推移へ</button>
+            </div>
+          </div>
+          <div class="investment-item">
+            <h3>債券</h3>
+            <label>
+              残高（円）
+              <input id="balanceBonds" type="number" min="0" step="1000" inputmode="numeric">
             </label>
             <label>
-              積立（月額）
-              <input id="contribStocks" type="number" min="0" step="1000" inputmode="numeric">
+              手動調整（円）
+              <input id="adjustBonds" type="number" step="1000" inputmode="numeric">
             </label>
             <label>
-              想定利回り（年率 %）
-              <input id="rateStocks" type="number" min="-100" max="100" step="0.1" inputmode="numeric">
+              平均利率（年率 %）
+              <input id="rateBonds" type="number" min="-100" max="100" step="0.1" inputmode="numeric">
             </label>
-            <label>
-              積立終了年齢
-              <input id="endAgeStocks" type="number" min="0" max="120" step="1" value="65" required>
-            </label>
+            <div class="bond-rate-average" id="bondRateAverageDisplay">平均利率: -</div>
+            <button id="bondDetailButton" type="button">債券入力</button>
+            <div class="asset-detail">
+              <label>
+                対象年
+                <select class="asset-year-select" data-asset-key="bonds"></select>
+              </label>
+              <button class="asset-detail-button" type="button" data-asset-key="bonds">月次推移へ</button>
+            </div>
           </div>
           <div class="investment-item">
             <h3>投資信託</h3>
@@ -361,23 +382,43 @@
               積立終了年齢
               <input id="endAgeFunds" type="number" min="0" max="120" step="1" value="65" required>
             </label>
+            <div class="asset-detail">
+              <label>
+                対象年
+                <select class="asset-year-select" data-asset-key="funds"></select>
+              </label>
+              <button class="asset-detail-button" type="button" data-asset-key="funds">月次推移へ</button>
+            </div>
           </div>
           <div class="investment-item">
-            <h3>債券</h3>
+            <h3>株式投資</h3>
             <label>
               残高（円）
-              <input id="balanceBonds" type="number" min="0" step="1000" inputmode="numeric">
+              <input id="balanceStocks" type="number" min="0" step="1000" inputmode="numeric">
             </label>
             <label>
               手動調整（円）
-              <input id="adjustBonds" type="number" step="1000" inputmode="numeric">
+              <input id="adjustStocks" type="number" step="1000" inputmode="numeric">
             </label>
             <label>
-              平均利率（年率 %）
-              <input id="rateBonds" type="number" min="-100" max="100" step="0.1" inputmode="numeric">
+              積立（月額）
+              <input id="contribStocks" type="number" min="0" step="1000" inputmode="numeric">
             </label>
-            <div class="bond-rate-average" id="bondRateAverageDisplay">平均利率: -</div>
-            <button id="bondDetailButton" type="button">債券入力</button>
+            <label>
+              想定利回り（年率 %）
+              <input id="rateStocks" type="number" min="-100" max="100" step="0.1" inputmode="numeric">
+            </label>
+            <label>
+              積立終了年齢
+              <input id="endAgeStocks" type="number" min="0" max="120" step="1" value="65" required>
+            </label>
+            <div class="asset-detail">
+              <label>
+                対象年
+                <select class="asset-year-select" data-asset-key="stocks"></select>
+              </label>
+              <button class="asset-detail-button" type="button" data-asset-key="stocks">月次推移へ</button>
+            </div>
           </div>
           <div class="investment-item">
             <h3>積立保険</h3>
@@ -398,6 +439,13 @@
               <input id="rateInsurance" type="number" min="-100" max="100" step="0.1" inputmode="numeric">
             </label>
             <button id="insuranceDetailButton" type="button">保険料詳細</button>
+            <div class="asset-detail">
+              <label>
+                対象年
+                <select class="asset-year-select" data-asset-key="insurance"></select>
+              </label>
+              <button class="asset-detail-button" type="button" data-asset-key="insurance">月次推移へ</button>
+            </div>
           </div>
           <div class="investment-item">
             <h3>ドル積立</h3>
@@ -417,6 +465,13 @@
               積立終了年齢
               <input id="endAgeUsd" type="number" min="0" max="120" step="1" value="65" required>
             </label>
+            <div class="asset-detail">
+              <label>
+                対象年
+                <select class="asset-year-select" data-asset-key="usd"></select>
+              </label>
+              <button class="asset-detail-button" type="button" data-asset-key="usd">月次推移へ</button>
+            </div>
           </div>
           <div class="investment-item">
             <h3>年金</h3>
@@ -433,6 +488,13 @@
               <input id="contribDc" type="number" min="0" step="1000" inputmode="numeric">
             </label>
             <button id="pensionDetailButton" type="button">年金詳細</button>
+            <div class="asset-detail">
+              <label>
+                対象年
+                <select class="asset-year-select" data-asset-key="dc"></select>
+              </label>
+              <button class="asset-detail-button" type="button" data-asset-key="dc">月次推移へ</button>
+            </div>
           </div>
         </div>
         <p class="helper-text">積立は「現金から差し引き、同額を投資残高に加算する」前提で表示します。</p>
@@ -453,7 +515,7 @@
             <thead>
               <tr>
                 <th>銘柄名</th>
-                <th>現金</th>
+                <th>現金から引く</th>
                 <th>通貨</th>
                 <th>保有額面</th>
                 <th>所得単価</th>
@@ -488,6 +550,33 @@
               <tbody id="bondMaturedBody"></tbody>
             </table>
           </div>
+        </div>
+
+        <div class="bond-matured">
+          <h3>その他資産の入力</h3>
+          <div class="bond-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>銘柄名</th>
+                  <th>現金から引く</th>
+                  <th>通貨</th>
+                  <th>保有額面</th>
+                  <th>所得単価</th>
+                  <th>利率（%）</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="otherAssetTableBody"></tbody>
+            </table>
+          </div>
+          <div class="bond-actions">
+            <button id="addOtherAssetRow" type="button">その他資産を追加</button>
+            <span class="bond-total" id="otherAssetTotalAmount">合計: -</span>
+          </div>
+        </div>
+        <div class="bond-actions">
+          <span class="bond-total" id="bondCashReclassTotal">現金から引く合計: -</span>
         </div>
       </section>
 
@@ -559,6 +648,30 @@
           </div>
         </div>
         <button id="addPensionChangeRow" type="button">変更を追加</button>
+      </section>
+
+      <section class="card page" data-page="asset-detail">
+        <h2 id="assetDetailTitle">資産の月次推移</h2>
+        <p class="helper-text" id="assetDetailSubtitle">対象年を指定して月次推移を確認します。</p>
+        <div class="asset-detail-controls">
+          <label>
+            対象年
+            <select id="assetDetailYear"></select>
+          </label>
+          <button id="assetDetailBack" type="button">資産残高一覧へ戻る</button>
+        </div>
+        <div class="asset-detail-table">
+          <table>
+            <thead>
+              <tr>
+                <th>月</th>
+                <th>月末残高</th>
+                <th>増減</th>
+              </tr>
+            </thead>
+            <tbody id="assetDetailTableBody"></tbody>
+          </table>
+        </div>
       </section>
     </main>
     <footer class="update-footer">

@@ -310,6 +310,32 @@ button:hover {
   color: var(--muted);
 }
 
+.asset-detail {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+  display: grid;
+  gap: 10px;
+}
+
+.asset-detail label {
+  margin-bottom: 0;
+}
+
+.asset-detail select {
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--ink);
+  background: #fff;
+}
+
+.asset-detail button {
+  width: 100%;
+}
+
 .investment-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -451,6 +477,60 @@ button:hover {
   padding: 6px 10px;
   border-radius: 999px;
   font-size: 12px;
+}
+
+.asset-detail-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 12px;
+}
+
+.asset-detail-controls label {
+  margin-bottom: 0;
+  flex: 1 1 180px;
+}
+
+.asset-detail-controls select {
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+  font-size: 15px;
+  font-family: inherit;
+  color: var(--ink);
+  background: #fff;
+}
+
+.asset-detail-table {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: auto;
+  background: #fff;
+  max-height: 420px;
+}
+
+.asset-detail-table table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 420px;
+}
+
+.asset-detail-table th,
+.asset-detail-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.asset-detail-table th {
+  background: #fbf8f2;
+  color: var(--muted);
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 
 .pension-changes {
