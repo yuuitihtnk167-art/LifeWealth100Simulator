@@ -1,12 +1,12 @@
-const CACHE_NAME = "lifewealth100-v1";
+const CACHE_NAME = "lifewealth100-v2";
 const ASSETS = [
   "./",
   "index.html",
   "styles.css",
   "app.js",
   "manifest.json",
-  "icon-192.svg",
-  "icon-512.svg",
+  "icon-192.png",
+  "icon-512.png",
 ];
 
 self.addEventListener("install", (event) => {

@@ -62,11 +62,11 @@
         <h2>マネーフォワード取り込み</h2>
         <label>
           資産一覧（表データを貼り付け）
-          <textarea id="assetData" rows="6" placeholder="資産区分\t大分類\t...\t金額(円)\t..."></textarea>
+          <textarea id="assetData" rows="6" placeholder="カテゴリ,名称,数量,取得単価,現在値,評価額,評価損益,評価損益率,保有金融機関,取得日"></textarea>
         </label>
         <label>
           資産推移（月次など）（表データを貼り付け）
-          <textarea id="summaryData" rows="4" placeholder="日付\t合計（円）\t..."></textarea>
+          <textarea id="summaryData" rows="4" placeholder="日付,合計,預金・現金・暗号資産,株式(現物),投資信託,債券,保険,年金,ポイント,その他の資産,詳細"></textarea>
         </label>
         <button id="applyImport" type="button">マネーフォワード取り込み</button>
         <div class="sync-panel">
@@ -334,6 +334,7 @@
                 <select class="asset-year-select" data-asset-key="cash"></select>
               </label>
               <button class="asset-detail-button" type="button" data-asset-key="cash">月次推移へ</button>
+              <button id="cashDetailButton" type="button">明細</button>
             </div>
           </div>
           <div class="investment-item">
@@ -518,7 +519,7 @@
                 <th>現金から引く</th>
                 <th>通貨</th>
                 <th>保有額面</th>
-                <th>所得単価</th>
+                <th>評価額</th>
                 <th>償還日</th>
                 <th>利率（%）</th>
                 <th>操作</th>
@@ -541,7 +542,7 @@
                   <th>銘柄名</th>
                   <th>通貨</th>
                   <th>保有額面</th>
-                  <th>所得単価</th>
+                  <th>評価額</th>
                   <th>償還日</th>
                   <th>利率（%）</th>
                   <th>償還日確定</th>
@@ -562,7 +563,7 @@
                   <th>現金から引く</th>
                   <th>通貨</th>
                   <th>保有額面</th>
-                  <th>所得単価</th>
+                  <th>評価額</th>
                   <th>利率（%）</th>
                   <th>操作</th>
                 </tr>
@@ -577,7 +578,36 @@
         </div>
         <div class="bond-actions">
           <span class="bond-total" id="bondCashReclassTotal">現金から引く合計: -</span>
+          <span class="bond-total" id="bondCombinedTotal">債券・その他資産 合計: -</span>
         </div>
+      </section>
+
+      <section class="card page" data-page="cash-detail">
+        <h2>現金の明細</h2>
+        <p class="helper-text">ポイントを現金に加算し、現金から引く合計を差し引いた残高を表示します。</p>
+        <div class="investment-summary">
+          <div>
+            <span>元の現金残高（ポイント除く）</span>
+            <strong id="cashDetailBase">-</strong>
+          </div>
+          <div>
+            <span>ポイント（現金に加算）</span>
+            <strong id="cashDetailPoints">-</strong>
+          </div>
+          <div>
+            <span>現金から引く合計</span>
+            <strong id="cashDetailReclass">-</strong>
+          </div>
+          <div>
+            <span>手動調整</span>
+            <strong id="cashDetailAdjustment">-</strong>
+          </div>
+          <div>
+            <span>現金残高（反映後）</span>
+            <strong id="cashDetailFinal">-</strong>
+          </div>
+        </div>
+        <button id="cashDetailBack" type="button">資産残高一覧へ戻る</button>
       </section>
 
       <section class="card page" data-page="insurance-detail">
