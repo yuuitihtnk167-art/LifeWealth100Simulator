@@ -136,8 +136,28 @@ textarea {
   background: #fff;
 }
 
+.input-with-hint {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-with-hint .retire-expense-input {
+  width: 100%;
+  padding-right: clamp(80px, 24%, 120px);
+}
+
 .retire-expense-input::placeholder {
   color: rgba(110, 95, 75, 0.45);
+}
+
+.retire-expense-hint {
+  position: absolute;
+  right: 14px;
+  font-size: 12px;
+  color: rgba(110, 95, 75, 0.45);
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 textarea {

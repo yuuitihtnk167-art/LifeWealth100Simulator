@@ -2018,6 +2018,20 @@ function updateRetireExpensePlaceholders() {
     if (input.placeholder !== placeholderValue) {
       input.placeholder = placeholderValue;
     }
+    const hint = input
+      .closest(".input-with-hint")
+      ?.querySelector(".retire-expense-hint");
+    if (hint) {
+      if (placeholderValue) {
+        if (hint.textContent !== placeholderValue) {
+          hint.textContent = placeholderValue;
+        }
+        hint.hidden = false;
+      } else {
+        hint.textContent = "";
+        hint.hidden = true;
+      }
+    }
   });
 }
 
