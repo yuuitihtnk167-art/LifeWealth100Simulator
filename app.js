@@ -223,6 +223,7 @@ const PENSION_PLANS_KEY = "lifewealth100.pension.plans.v1";
 const PENSION_CHANGES_KEY = "lifewealth100.pension.changes.v1";
 const PUSH_TIMESTAMP_KEY = "lifewealth100.lastPushTimestamp.v1";
 const ADJUSTMENT_APPLIED_KEY = "lifewealth100.adjustmentsApplied.v1";
+const STORAGE_PREFIX = "lifewealth100.";
 const GITHUB_REPO_FALLBACK = {
   owner: "yuuitihtnk167-art",
   repo: "LifeWealth100Simulator",
@@ -251,7 +252,7 @@ const percentFormatter = new Intl.NumberFormat("ja-JP", {
 // 投資信託（funds）と保険（insurance）のみ期中利息/配当を含む（複利計算）
 // 他のカテゴリー（現金、株式、債券等）は期中の時価変動を反映しない（当初原価ベース）
 function isCompoundingCategory(key) {
-  return key === "funds" || key === "insurance";
+  return key === "stocks" || key === "funds" || key === "insurance";
 }
 
 function toYenAmount(value) {
@@ -1518,10 +1519,7 @@ function simulateAnnualStatements({
     );
     yearBondMaturityFace += bondMaturityFlow.faceValue || 0;
     yearBondMaturityBook += bondMaturityFlow.bookValue || 0;
-    if (bondMaturityFlow.gain) {
-      yearInvestmentGain += bondMaturityFlow.gain;
-      yearGainByCategory.bonds += bondMaturityFlow.gain;
-    }
+    // 債券の差額は利息（現金）として扱うため運用益には含めない
     const pensionFlow = applyPensionPlanFlow(
       data,
       monthIndexValue,
@@ -1544,10 +1542,12 @@ function simulateAnnualStatements({
       // 会計処理：年度決算の資産増減分析
       // netCash = 現金ベースの収支（収入 - 支出）
       // investmentGain = 運用益（含み益）
-      // totalChange = 資産増減の総額（netCash + investmentGain）
+      // bondMaturityGain = 債券償還の差額（額面 - 評価額）
+      // totalChange = 資産増減の総額（netCash + investmentGain + bondMaturityGain）
       // 期末残高 = 期首残高 + 資産増減総額
       const netCash = yearIncome - yearExpense;
-      const totalChange = netCash + yearInvestmentGain;
+      const bondMaturityGain = yearBondMaturityFace - yearBondMaturityBook;
+      const totalChange = netCash + yearInvestmentGain + bondMaturityGain;
       const mismatch =
         Math.round(startTotal + totalChange) !== Math.round(endTotal);
       const yearDividendDelta = getDividendDelta(
@@ -4395,6 +4395,44 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function buildStorageSnapshot() {
+  try {
+    const snapshot = {};
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith(STORAGE_PREFIX)) {
+        continue;
+      }
+      const value = localStorage.getItem(key);
+      if (value !== null) {
+        snapshot[key] = value;
+      }
+    }
+    return snapshot;
+  } catch {
+    return null;
+  }
+}
+
+function restoreStorageSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") {
+    return false;
+  }
+  try {
+    Object.entries(snapshot).forEach(([key, value]) => {
+      if (!key || !key.startsWith(STORAGE_PREFIX)) {
+        return;
+      }
+      if (typeof value === "string") {
+        localStorage.setItem(key, value);
+      }
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function getInsurancePlanSnapshot() {
   if (insurancePlanBody) {
     return Array.from(insurancePlanBody.querySelectorAll("tr")).map((row) =>
@@ -4435,9 +4473,11 @@ function buildSyncPayload() {
   const insurancePlans = getInsurancePlanSnapshot();
   const pensionPlans = getPensionPlanSnapshot();
   const pensionChanges = getPensionChangeSnapshot();
+  const storage = buildStorageSnapshot();
   return {
-    version: 2,
+    version: 3,
     exportedAt: new Date().toISOString(),
+    storage,
     inputs,
     bonds,
     otherAssets,
@@ -4490,6 +4530,7 @@ function importSyncPayload(raw) {
     window.alert("同期データの形式が正しくありません。");
     return false;
   }
+  const storage = isPlainObject(data.storage) ? data.storage : null;
   const inputs = isPlainObject(data.inputs) ? data.inputs : null;
   const bonds = data.bonds ? normalizeBondStorage(data.bonds) : null;
   const otherAssets = Array.isArray(data.otherAssets) ? data.otherAssets : null;
@@ -4506,6 +4547,7 @@ function importSyncPayload(raw) {
     ? data.pensionChanges
     : null;
   if (
+    !storage &&
     !inputs &&
     !bonds &&
     !otherAssets &&
@@ -4518,6 +4560,9 @@ function importSyncPayload(raw) {
     return false;
   }
   try {
+    if (storage) {
+      restoreStorageSnapshot(storage);
+    }
     if (inputs) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(inputs));
     }
@@ -4546,6 +4591,13 @@ function importSyncPayload(raw) {
     return false;
   }
   loadPersistedInputs();
+  cashInputManual = readCashManualFlag();
+  if (balanceCashInput && balanceCashInput.value === "") {
+    cashInputManual = false;
+    writeCashManualFlag(false);
+  }
+  initializeAdjustments({ applyToBalance: false, includeBonds: true });
+  writeAdjustmentsAppliedFlag(true);
   loadBondRows();
   loadOtherAssetRows();
   loadInsurancePlanRows();
@@ -5415,17 +5467,17 @@ function buildBalanceSheetCsvLine(row, birthDate) {
   const investmentGainExpression = buildSignedExpression([
     row.gainsByCategory.funds,
     row.gainsByCategory.insurance,
-    row.gainsByCategory.bonds,
   ]);
   const bondMaturityCashExpression = toCsvNumber(row.bondMaturity || 0);
   const bondMaturityBookExpression = toCsvNumber(row.bondMaturityBook || 0);
+  const bondMaturityGainExpression = `(${bondMaturityCashExpression})-(${bondMaturityBookExpression})`;
   const pensionTransferExpression = toCsvNumber(row.pensionTransfer || 0);
   const cashEndExpression = `${toCsvNumber(row.start.cash)}+(${cashIncomeExpression})-(${expenseExpression})-${toCsvNumber(
     row.contributions
   )}+${bondMaturityCashExpression}+${pensionTransferExpression}`;
   const endTotalExpression = `${toCsvNumber(
     row.start.total
-  )}+(${netExpression})+(${investmentGainExpression})`;
+  )}+(${netExpression})+(${investmentGainExpression})+(${bondMaturityGainExpression})`;
   return [
     row.year,
     formatAgeYears(birthDate, periodStartDate),
@@ -5491,7 +5543,7 @@ function buildProfitLossCsv(row, birthDate) {
   // 会計処理：損益計算書（P/L）の構造
   // 本シミュレーターの「損益計算書」は、実際にはキャッシュフロー分析に近い構造
   // 運用益（含み益）は期中の時価変動を反映しており、実現益と区分されていない
-  // 資産増減 = 収支 + 運用益（含み益）
+  // 資産増減 = 収支 + 運用益（含み益） + 債券償還差額
   const header =
     "年度,年齢,対象月数,収入（円）,支出（円）,収支（円）,運用益（円）,資産増減（円）,期首合計（円）,期末合計（円）";
   const line = buildProfitLossCsvLine(row, birthDate);
@@ -5525,12 +5577,14 @@ function buildProfitLossCsvLine(row, birthDate) {
   const investmentGainExpression = buildSignedExpression([
     row.gainsByCategory.stocks,
     row.gainsByCategory.funds,
-    row.gainsByCategory.bonds,
     row.gainsByCategory.insurance,
     row.gainsByCategory.dc,
     row.gainsByCategory.other,
   ]);
-  const totalChangeExpression = `(${netExpression})+(${investmentGainExpression})`;
+  const bondMaturityCashExpression = toCsvNumber(row.bondMaturity || 0);
+  const bondMaturityBookExpression = toCsvNumber(row.bondMaturityBook || 0);
+  const bondMaturityGainExpression = `(${bondMaturityCashExpression})-(${bondMaturityBookExpression})`;
+  const totalChangeExpression = `(${netExpression})+(${investmentGainExpression})+(${bondMaturityGainExpression})`;
   const endTotalExpression = `${toCsvNumber(
     row.start.total
   )}+(${totalChangeExpression})`;
