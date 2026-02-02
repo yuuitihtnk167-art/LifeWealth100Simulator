@@ -70,6 +70,7 @@ const syncStatus = document.getElementById("syncStatus");
 const expenseInputs = Array.from(document.querySelectorAll(".expense-input"));
 const monthlyExpense = document.getElementById("monthlyExpense");
 const incomeInputs = Array.from(document.querySelectorAll(".income-input"));
+const dividendYieldInput = document.getElementById("dividendYield");
 const monthlyIncome = document.getElementById("monthlyIncome");
 const retireExpenseInputs = Array.from(
   document.querySelectorAll(".retire-expense-input")
@@ -692,6 +693,39 @@ function fullMonthsBetween(startDate, endDate) {
   return Math.max(0, months);
 }
 
+function getDividendMultiplier(startMonthIndex, monthIndexValue, annualRate) {
+  if (!Number.isFinite(annualRate) || annualRate === 0) {
+    return 1;
+  }
+  const startYear = Math.floor(startMonthIndex / 12);
+  const currentYear = Math.floor(monthIndexValue / 12);
+  const years = currentYear - startYear;
+  if (years <= 0) {
+    return 1;
+  }
+  return Math.pow(1 + annualRate, years);
+}
+
+function getDividendDelta(
+  baseDividend,
+  startMonthIndex,
+  monthIndexValue,
+  annualRate
+) {
+  if (!Number.isFinite(baseDividend) || baseDividend === 0) {
+    return 0;
+  }
+  const multiplier = getDividendMultiplier(
+    startMonthIndex,
+    monthIndexValue,
+    annualRate
+  );
+  if (multiplier === 1) {
+    return 0;
+  }
+  return baseDividend * (multiplier - 1);
+}
+
 function simulateToAge100({
   currentAssets,
   annualRate,
@@ -700,6 +734,8 @@ function simulateToAge100({
   monthlyNetCash,
   retirementMonthlyNetCash,
   postRetirementMonthlyNetCash,
+  baseDividendIncome,
+  dividendYieldRate,
   monthsRemaining,
   startMonthIndex,
 }) {
@@ -710,12 +746,18 @@ function simulateToAge100({
   for (let i = 0; i < months; i += 1) {
     const startAssets = assets;
     const monthIndex = startMonthIndex + i;
-    let cashFlow = monthlyNetCash;
+    const dividendDelta = getDividendDelta(
+      baseDividendIncome,
+      startMonthIndex,
+      monthIndex,
+      dividendYieldRate
+    );
+    let cashFlow = monthlyNetCash + dividendDelta;
     if (monthIndex >= retirementAge) {
-      cashFlow = retirementMonthlyNetCash;
+      cashFlow = retirementMonthlyNetCash + dividendDelta;
     }
     if (monthIndex >= retirementIncomeEndAge) {
-      cashFlow = postRetirementMonthlyNetCash;
+      cashFlow = postRetirementMonthlyNetCash + dividendDelta;
     }
     const investmentIncome = startAssets * monthlyRate;
     assets = startAssets + cashFlow + investmentIncome;
@@ -732,6 +774,8 @@ function simulateToAge100Detailed({
   monthlyNetCash,
   retirementMonthlyNetCash,
   postRetirementMonthlyNetCash,
+  baseDividendIncome,
+  dividendYieldRate,
   contributionSchedule,
   categories,
   categoryRates,
@@ -755,12 +799,18 @@ function simulateToAge100Detailed({
 
   for (let i = 0; i < months; i += 1) {
     const monthIndexValue = startMonthIndex + i;
-    let cashFlow = monthlyNetCash;
+    const dividendDelta = getDividendDelta(
+      baseDividendIncome,
+      startMonthIndex,
+      monthIndexValue,
+      dividendYieldRate
+    );
+    let cashFlow = monthlyNetCash + dividendDelta;
     if (monthIndexValue >= retirementAge) {
-      cashFlow = retirementMonthlyNetCash;
+      cashFlow = retirementMonthlyNetCash + dividendDelta;
     }
     if (monthIndexValue >= retirementIncomeEndAge) {
-      cashFlow = postRetirementMonthlyNetCash;
+      cashFlow = postRetirementMonthlyNetCash + dividendDelta;
     }
 
     investKeys.forEach((key) => {
@@ -1012,6 +1062,8 @@ function findNegativeCashMonth({
   monthlyNetCash,
   retirementMonthlyNetCash,
   postRetirementMonthlyNetCash,
+  baseDividendIncome,
+  dividendYieldRate,
   retirementAge,
   retirementIncomeEndAge,
   contributionSchedule,
@@ -1022,12 +1074,18 @@ function findNegativeCashMonth({
   const months = Math.max(0, monthsRemaining);
   for (let i = 0; i < months; i += 1) {
     const monthIndexValue = startMonthIndex + i;
-    let cashFlow = monthlyNetCash;
+    const dividendDelta = getDividendDelta(
+      baseDividendIncome,
+      startMonthIndex,
+      monthIndexValue,
+      dividendYieldRate
+    );
+    let cashFlow = monthlyNetCash + dividendDelta;
     if (monthIndexValue >= retirementAge) {
-      cashFlow = retirementMonthlyNetCash;
+      cashFlow = retirementMonthlyNetCash + dividendDelta;
     }
     if (monthIndexValue >= retirementIncomeEndAge) {
-      cashFlow = postRetirementMonthlyNetCash;
+      cashFlow = postRetirementMonthlyNetCash + dividendDelta;
     }
     cash += cashFlow;
     cash -= getContributionForMonth(monthIndexValue, contributionSchedule);
@@ -1048,6 +1106,8 @@ function findNegativeCashMonthDetailed({
   monthlyNetCash,
   retirementMonthlyNetCash,
   postRetirementMonthlyNetCash,
+  baseDividendIncome,
+  dividendYieldRate,
   contributionSchedule,
   categories,
   bondMaturities,
@@ -1072,12 +1132,18 @@ function findNegativeCashMonthDetailed({
   for (let i = 0; i < totalMonths; i += 1) {
     const monthIndexValue = startMonthIndex + i;
     const monthDate = addMonths(startDate, i);
-    let cashFlow = monthlyNetCash;
+    const dividendDelta = getDividendDelta(
+      baseDividendIncome,
+      startMonthIndex,
+      monthIndexValue,
+      dividendYieldRate
+    );
+    let cashFlow = monthlyNetCash + dividendDelta;
     if (monthIndexValue >= retirementAge) {
-      cashFlow = retirementMonthlyNetCash;
+      cashFlow = retirementMonthlyNetCash + dividendDelta;
     }
     if (monthIndexValue >= retirementIncomeEndAge) {
-      cashFlow = postRetirementMonthlyNetCash;
+      cashFlow = postRetirementMonthlyNetCash + dividendDelta;
     }
 
     investKeys.forEach((key) => {
@@ -1124,6 +1190,8 @@ function simulateAnnualSeries({
   monthlyNetCash,
   retirementMonthlyNetCash,
   postRetirementMonthlyNetCash,
+  baseDividendIncome,
+  dividendYieldRate,
   contributionSchedule,
   categories,
   bondMaturities,
@@ -1149,12 +1217,18 @@ function simulateAnnualSeries({
   for (let i = 0; i < totalMonths; i += 1) {
     const monthIndexValue = startMonthIndex + i;
     const monthDate = addMonths(startDate, i);
-    let cashFlow = monthlyNetCash;
+    const dividendDelta = getDividendDelta(
+      baseDividendIncome,
+      startMonthIndex,
+      monthIndexValue,
+      dividendYieldRate
+    );
+    let cashFlow = monthlyNetCash + dividendDelta;
     if (monthIndexValue >= retirementAge) {
-      cashFlow = retirementMonthlyNetCash;
+      cashFlow = retirementMonthlyNetCash + dividendDelta;
     }
     if (monthIndexValue >= retirementIncomeEndAge) {
-      cashFlow = postRetirementMonthlyNetCash;
+      cashFlow = postRetirementMonthlyNetCash + dividendDelta;
     }
 
     investKeys.forEach((key) => {
@@ -1208,6 +1282,8 @@ function simulateMonthlySeries({
   retireExpense,
   pensionIncome,
   pensionExpense,
+  baseDividendIncome,
+  dividendYieldRate,
   contributionSchedule,
   categories,
   bondMaturities,
@@ -1233,14 +1309,20 @@ function simulateMonthlySeries({
   for (let i = 0; i < totalMonths; i += 1) {
     const monthIndexValue = startMonthIndex + i;
     const monthDate = addMonths(startDate, i);
-    let monthlyIncome = workIncome;
+    const dividendDelta = getDividendDelta(
+      baseDividendIncome,
+      startMonthIndex,
+      monthIndexValue,
+      dividendYieldRate
+    );
+    let monthlyIncome = workIncome + dividendDelta;
     let monthlyExpense = workExpense;
     if (monthIndexValue >= retirementAge) {
-      monthlyIncome = retireIncome;
+      monthlyIncome = retireIncome + dividendDelta;
       monthlyExpense = retireExpense;
     }
     if (monthIndexValue >= retirementIncomeEndAge) {
-      monthlyIncome = pensionIncome;
+      monthlyIncome = pensionIncome + dividendDelta;
       monthlyExpense = pensionExpense;
     }
 
@@ -1301,6 +1383,8 @@ function simulateAnnualStatements({
   retireExpense,
   pensionIncome,
   pensionExpense,
+  baseDividendIncome,
+  dividendYieldRate,
   contributionSchedule,
   categories,
   bondMaturities,
@@ -1362,16 +1446,22 @@ function simulateAnnualStatements({
     const monthIndexValue = startMonthIndex + i;
     const monthDate = addMonths(startDate, i);
 
-    let monthlyIncome = workIncome;
+    const dividendDelta = getDividendDelta(
+      baseDividendIncome,
+      startMonthIndex,
+      monthIndexValue,
+      dividendYieldRate
+    );
+    let monthlyIncome = workIncome + dividendDelta;
     let monthlyExpense = workExpense;
     let phase = "work";
     if (monthIndexValue >= retirementAge) {
-      monthlyIncome = retireIncome;
+      monthlyIncome = retireIncome + dividendDelta;
       monthlyExpense = retireExpense;
       phase = "retire";
     }
     if (monthIndexValue >= retirementIncomeEndAge) {
-      monthlyIncome = pensionIncome;
+      monthlyIncome = pensionIncome + dividendDelta;
       monthlyExpense = pensionExpense;
       phase = "pension";
     }
@@ -1457,6 +1547,12 @@ function simulateAnnualStatements({
       const totalChange = netCash + yearInvestmentGain;
       const mismatch =
         Math.round(startTotal + totalChange) !== Math.round(endTotal);
+      const yearDividendDelta = getDividendDelta(
+        baseDividendIncome,
+        startMonthIndex,
+        monthIndexValue,
+        dividendYieldRate
+      );
       rows.push({
         year: monthDate.getFullYear(),
         date: endDate,
@@ -1479,9 +1575,9 @@ function simulateAnnualStatements({
         workMonths: yearWorkMonths,
         retireMonths: yearRetireMonths,
         pensionMonths: yearPensionMonths,
-        workIncome,
-        retireIncome,
-        pensionIncome,
+        workIncome: workIncome + yearDividendDelta,
+        retireIncome: retireIncome + yearDividendDelta,
+        pensionIncome: pensionIncome + yearDividendDelta,
         workExpense,
         retireExpense,
         pensionExpense,
@@ -4772,6 +4868,8 @@ function handleExportCsv() {
       context.pensionIncomeTotal +
       context.ongoingIncome -
       context.retireExpenseTotal,
+    baseDividendIncome: context.baseDividendIncome,
+    dividendYieldRate: context.dividendYieldRate,
     contributionSchedule: context.contributionSchedule,
     categories: context.categories,
     bondMaturities: context.bondMaturities,
@@ -4818,6 +4916,8 @@ function handleOpenCsv() {
       context.pensionIncomeTotal +
       context.ongoingIncome -
       context.retireExpenseTotal,
+    baseDividendIncome: context.baseDividendIncome,
+    dividendYieldRate: context.dividendYieldRate,
     contributionSchedule: context.contributionSchedule,
     categories: context.categories,
     bondMaturities: context.bondMaturities,
@@ -4940,6 +5040,10 @@ function getSimulationContext() {
   const retireBaseIncome =
     (retireIncomeMap.salary || 0) +
     (retireIncomeMap.bonus || 0);
+  const dividendYieldPercent = parseNumber(dividendYieldInput?.value);
+  const dividendYieldRate =
+    dividendYieldPercent === null ? 0 : dividendYieldPercent / 100;
+  const baseDividendIncome = incomeMap.dividend || 0;
   const pensionIncomeTotal = sumInputs(pensionIncomeInputs);
   const ongoingIncome = (incomeMap.dividend || 0) + (incomeMap.other || 0);
   const summaryBreakdown = importDirty
@@ -4982,6 +5086,8 @@ function getSimulationContext() {
     retireBaseIncome,
     pensionIncomeTotal,
     ongoingIncome,
+    baseDividendIncome,
+    dividendYieldRate,
     contributionSchedule,
     categories,
     bondMaturities,
@@ -5012,6 +5118,8 @@ function buildStatementRows({ showAlert }) {
     retireExpense: context.retireExpenseTotal,
     pensionIncome: context.pensionIncomeTotal + context.ongoingIncome,
     pensionExpense: context.retireExpenseTotal,
+    baseDividendIncome: context.baseDividendIncome,
+    dividendYieldRate: context.dividendYieldRate,
     contributionSchedule: context.contributionSchedule,
     categories: context.categories,
     bondMaturities: context.bondMaturities,
@@ -5204,6 +5312,8 @@ function renderAssetDetail() {
     retireExpense: context.retireExpenseTotal,
     pensionIncome: context.pensionIncomeTotal + context.ongoingIncome,
     pensionExpense: context.retireExpenseTotal,
+    baseDividendIncome: context.baseDividendIncome,
+    dividendYieldRate: context.dividendYieldRate,
     contributionSchedule: context.contributionSchedule,
     categories: context.categories,
     bondMaturities: context.bondMaturities,
@@ -5666,6 +5776,10 @@ function render() {
   const retireBaseIncome =
     (retireIncomeMap.salary || 0) +
     (retireIncomeMap.bonus || 0);
+  const dividendYieldPercent = parseNumber(dividendYieldInput?.value);
+  const dividendYieldRate =
+    dividendYieldPercent === null ? 0 : dividendYieldPercent / 100;
+  const baseDividendIncome = incomeMap.dividend || 0;
   const pensionIncomeTotal = sumInputs(pensionIncomeInputs);
   const ongoingIncome = (incomeMap.dividend || 0) + (incomeMap.other || 0);
   const retireIncomeTotal = retireBaseIncome;
@@ -5834,6 +5948,8 @@ function render() {
             monthlyNetCash,
             retirementMonthlyNetCash,
             postRetirementMonthlyNetCash,
+            baseDividendIncome,
+            dividendYieldRate,
             contributionSchedule,
             categories,
             bondMaturities: simulationContext?.bondMaturities,
@@ -5918,6 +6034,8 @@ function render() {
         monthlyNetCash,
         retirementMonthlyNetCash,
         postRetirementMonthlyNetCash,
+        baseDividendIncome,
+        dividendYieldRate,
         contributionSchedule,
         categories: context.categories,
         categoryRates: context.categoryRates,
@@ -5933,6 +6051,8 @@ function render() {
         monthlyNetCash,
         retirementMonthlyNetCash,
         postRetirementMonthlyNetCash,
+        baseDividendIncome,
+        dividendYieldRate,
         monthsRemaining,
         startMonthIndex: monthIndex(today),
       });
