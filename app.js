@@ -10,7 +10,8 @@
  * - bonds：債券・固定利付証券（評価額ベース、満期時に額面現金化）
  * - insurance：保険商品（複利計算により含み益を認識）
  * - dc：確定拠出年金・企業年金（拠出フェーズと給付フェーズで区分）
- * - other：その他資産（外貨等、当初原価ベース）
+ * - usd：ドル積立（円換算・当初原価ベース）
+ * - other：その他資産（当初原価ベース）
  * 
  * 運用益の認識：
  * - 複利計算対象（funds、insurance）：期中の利息・配当を含み益として計上
@@ -33,13 +34,20 @@ const assetDataInput = document.getElementById("assetData");
 const summaryDataInput = document.getElementById("summaryData");
 const importButton = document.getElementById("applyImport");
 const exportButton = document.getElementById("exportCsv");
+const openCsvButton = document.getElementById("openCsv");
 const statementYearFromSelect = document.getElementById("statementYearFrom");
 const statementYearToSelect = document.getElementById("statementYearTo");
 const exportBalanceSheetDecadeButton = document.getElementById(
   "exportBalanceSheetDecade"
 );
+const openBalanceSheetDecadeButton = document.getElementById(
+  "openBalanceSheetDecade"
+);
 const exportProfitLossDecadeButton = document.getElementById(
   "exportProfitLossDecade"
+);
+const openProfitLossDecadeButton = document.getElementById(
+  "openProfitLossDecade"
 );
 const bondTableBody = document.getElementById("bondTableBody");
 const bondMaturedBody = document.getElementById("bondMaturedBody");
@@ -197,7 +205,7 @@ const ASSET_CATEGORY_KEYS = {
   funds: "funds",
   bonds: "bonds",
   insurance: "insurance",
-  usd: "other",
+  usd: "usd",
   dc: "dc",
 };
 
@@ -1275,6 +1283,7 @@ function sumCategoryTotal(data) {
     data.bonds +
     data.insurance +
     data.dc +
+    (data.usd || 0) +
     data.other
   );
 }
@@ -1332,6 +1341,7 @@ function simulateAnnualStatements({
     bonds: 0,
     insurance: 0,
     dc: 0,
+    usd: 0,
     other: 0,
   };
   let yearGainByCategory = {
@@ -1340,6 +1350,7 @@ function simulateAnnualStatements({
     bonds: 0,
     insurance: 0,
     dc: 0,
+    usd: 0,
     other: 0,
   };
   let yearWorkMonths = 0;
@@ -1492,6 +1503,7 @@ function simulateAnnualStatements({
         bonds: 0,
         insurance: 0,
         dc: 0,
+        usd: 0,
         other: 0,
       };
       yearGainByCategory = {
@@ -1500,6 +1512,7 @@ function simulateAnnualStatements({
         bonds: 0,
         insurance: 0,
         dc: 0,
+        usd: 0,
         other: 0,
       };
       yearWorkMonths = 0;
@@ -1638,7 +1651,7 @@ function buildContributionSchedule(birthDate, options = {}) {
     },
         ]),
     {
-      category: "other",
+      category: "usd",
       amount: parseNumber(contribUsdInput.value) || 0,
       endMonthIndex: toEndMonth(endAgeUsdInput),
     },
@@ -1770,10 +1783,11 @@ function buildInitialCategories(summaryBreakdown, currentAssets) {
       summaryBreakdown.insurance
     );
     const points = summaryBreakdown.points || 0;
-    const other = (summaryBreakdown.other || 0) + usdBalance;
+    const other = summaryBreakdown.other || 0;
+    const usd = usdBalance;
     const cashFromSummaryBase =
       Number.isFinite(summaryBreakdown.cash) ? summaryBreakdown.cash : null;
-    const investmentTotal = stocks + funds + bonds + insurance + dc + other;
+    const investmentTotal = stocks + funds + bonds + insurance + dc + other + usd;
     const cashForTotal = cashFromSummaryBase !== null
       ? cashFromSummaryBase + points - (bondReclass + otherAssetsCashReclass)
       : 0;
@@ -1811,6 +1825,7 @@ function buildInitialCategories(summaryBreakdown, currentAssets) {
       bonds,
       insurance,
       dc,
+      usd,
       points: 0,
       other,
       total: total || 0,
@@ -1826,7 +1841,8 @@ function buildInitialCategories(summaryBreakdown, currentAssets) {
   // 会計処理：初期現金残高の計算
   // 現在資産 = 現金 + 各投資資産 の関係から現金を逆算
   // 投資資産の合計が現在資産を超えないようにチェック（超える場合は警告）
-  const investmentTotal = stocks + funds + bonds + insurance + dc + usd;
+  const other = 0;
+  const investmentTotal = stocks + funds + bonds + insurance + dc + usd + other;
   const currentAssetsValue = parseNumber(currentAssets) || 0;
   let cash = currentAssetsValue - investmentTotal;
   
@@ -1856,8 +1872,9 @@ function buildInitialCategories(summaryBreakdown, currentAssets) {
     bonds,
     insurance,
     dc,
+    usd,
     points: 0,
-    other: usd,
+    other,
     total: currentAssetsValue,
   };
 }
@@ -2090,6 +2107,98 @@ function downloadCsvText(csv, filename) {
   void saveCsvWithPicker(csv, filename);
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function toTsvCell(value) {
+  return String(value ?? "").replace(/\t/g, " ").replace(/\r?\n/g, " ");
+}
+
+function openSpreadsheetView({ title, headers, rows }) {
+  const popup = window.open("", "_blank");
+  if (!popup) {
+    window.alert("ポップアップがブロックされました。ブラウザ設定を確認してください。");
+    return;
+  }
+  const safeTitle = escapeHtml(title || "CSV");
+  const headHtml = headers
+    .map((header) => `<th>${escapeHtml(header)}</th>`)
+    .join("");
+  const bodyHtml = rows
+    .map(
+      (row) =>
+        `<tr>${row
+          .map((cell) => `<td>${escapeHtml(cell)}</td>`)
+          .join("")}</tr>`
+    )
+    .join("");
+  const tsv = [headers, ...rows]
+    .map((row) => row.map(toTsvCell).join("\t"))
+    .join("\n");
+  const html = `<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${safeTitle}</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 24px; color: #222; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+    h1 { font-size: 18px; margin: 0; }
+    button { border: none; border-radius: 999px; background: #2f6b5c; color: #fff; padding: 8px 14px; cursor: pointer; }
+    table { border-collapse: collapse; width: 100%; font-size: 12px; }
+    th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: right; }
+    th:first-child, td:first-child { text-align: left; }
+    th:nth-child(2), td:nth-child(2) { text-align: left; }
+    .copy-panel { margin-top: 16px; display: grid; gap: 8px; }
+    textarea { width: 100%; min-height: 140px; padding: 8px; font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .note { color: #666; font-size: 12px; margin: 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>${safeTitle}</h1>
+    <button id="copyTsv" type="button">TSVをコピー</button>
+  </header>
+  <table>
+    <thead>
+      <tr>${headHtml}</tr>
+    </thead>
+    <tbody>
+      ${bodyHtml}
+    </tbody>
+  </table>
+  <div class="copy-panel">
+    <p class="note">スプレッドシートに貼り付ける場合はTSVをコピーしてください。</p>
+    <textarea id="tsvArea" readonly></textarea>
+  </div>
+  <script>
+    const tsv = ${JSON.stringify(tsv)};
+    const area = document.getElementById("tsvArea");
+    area.value = tsv;
+    document.getElementById("copyTsv").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(tsv);
+        alert("TSVをコピーしました");
+      } catch (error) {
+        area.focus();
+        area.select();
+      }
+    });
+  </script>
+</body>
+</html>`;
+  popup.document.open();
+  popup.document.write(html);
+  popup.document.close();
+}
+
 function detectDelimiter(lines) {
   if (lines.some((line) => line.includes("\t"))) {
     return "\t";
@@ -2236,7 +2345,23 @@ function findSummaryTotalIndex(headers) {
   );
 }
 
+function normalizeImportText(value) {
+  return String(value ?? "")
+    .replace(/[\s　]+/g, "")
+    .replace(/[‐‑‒–—−ー－]/g, "-")
+    .toLowerCase();
+}
+
+function isUsdDepositRow({ type, category, name, rowText }) {
+  const text = `${type || ""} ${category || ""} ${name || ""} ${rowText || ""}`;
+  const compact = normalizeImportText(text);
+  return /米ドル普通/.test(compact);
+}
+
 function shouldReclassifyToOther({ type, category, name }) {
+  if (isUsdDepositRow({ type, category, name })) {
+    return false;
+  }
   const text = `${type || ""} ${category || ""} ${name || ""}`;
   const nameText = String(name || "").trim();
   const categoryText = String(category || "").trim();
@@ -2711,6 +2836,141 @@ function extractImportedAssetRows(text) {
   return { bondRows, otherAssetRows, otherAssetReclassTotalYen };
 }
 
+function extractUsdDepositFromAssetList(text) {
+  const table = parseAssetTable(text);
+  if (!table) {
+    return extractUsdDepositFromLooseText(text);
+  }
+
+  const headers = table.headers.map((header) => String(header ?? ""));
+  const typeIndex = findHeaderIndex(
+    headers,
+    /資産区分|資産種別|資産タイプ|カテゴリ|カテゴリー|科目|種別|分類/
+  );
+  const nameIndex = findHeaderIndex(
+    headers,
+    /名称|銘柄|商品|口座|資産名|ファンド/
+  );
+  const categoryIndex = findHeaderIndex(
+    headers,
+    /大分類|中分類|小分類|分類|種別|カテゴリ|カテゴリー|科目/
+  );
+  const currencyIndex = findHeaderIndex(
+    headers,
+    /通貨|通貨コード|通貨名|通貨単位|通貨区分/
+  );
+  const yenAmountIndex = findHeaderIndex(
+    headers,
+    /(評価額|時価|残高|金額|現在高|口座残高|保有額).*(円|JPY|円換算)/
+  );
+  const amountIndex = findAssetAmountIndex(headers);
+  if (amountIndex === null) {
+    return extractUsdDepositFromLooseText(text);
+  }
+
+  let matched = null;
+
+  table.dataRows.forEach((row) => {
+    const type = typeIndex === null ? "" : row[typeIndex] || "";
+    const name = nameIndex === null ? "" : row[nameIndex] || "";
+    const category = categoryIndex === null ? "" : row[categoryIndex] || "";
+    const rowText = row.map((cell) => String(cell ?? "")).join(" ").trim();
+    if (!isUsdDepositRow({ type, category, name, rowText })) {
+      return;
+    }
+
+    const rawAmount = getRowAmount(row, amountIndex);
+    const yenAmount = getRowAmount(row, yenAmountIndex);
+    const valuationYen = yenAmount ?? rawAmount;
+    if (!Number.isFinite(valuationYen)) {
+      return;
+    }
+    const yenValue = toYenAmount(valuationYen);
+    const resolvedName =
+      name ||
+      resolveNameFromRow(row, headers, { typeIndex, nameIndex, categoryIndex }) ||
+      category ||
+      type ||
+      "米ドル普通";
+    const textValue = `${type} ${category} ${name} ${rowText}`.trim();
+    matched = {
+      name: resolvedName,
+      currency: "JPY",
+      amount: valuationYen,
+      amountYen: yenValue,
+      cash: isImportCashReclass(textValue),
+    };
+  });
+
+  return matched || extractUsdDepositFromLooseText(text);
+}
+
+function extractUsdDepositFromLooseText(text) {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  let matched = null;
+  lines.forEach((line) => {
+    if (!/米ドル普通/.test(line)) {
+      return;
+    }
+    const numbers = line.match(/[+-]?\d[\d,]*(?:\.\d+)?/g);
+    if (!numbers || !numbers.length) {
+      return;
+    }
+    const amount = parseDecimalAmount(numbers[numbers.length - 1]);
+    if (!Number.isFinite(amount)) {
+      return;
+    }
+    matched = {
+      name: "米ドル普通",
+      currency: "JPY",
+      amount,
+      amountYen: toYenAmount(amount),
+      cash: isImportCashReclass(line),
+    };
+  });
+  return matched;
+}
+
+function upsertUsdDepositBondRow(info) {
+  if (!info || !Number.isFinite(info.amount)) {
+    return false;
+  }
+  const stored = readBondStorage();
+  const active = Array.isArray(stored.active) ? stored.active : [];
+  const targetIndex = active.findIndex((row) =>
+    isUsdDepositRow({ name: row?.name })
+  );
+  const faceValue = formatImportAmount(info.amount);
+  const purchasePrice = formatImportAmount(info.amount);
+  if (targetIndex >= 0) {
+    const target = active[targetIndex];
+    target.currency = "JPY";
+    if (faceValue !== "") {
+      target.faceValue = faceValue;
+    }
+    if (purchasePrice !== "") {
+      target.purchasePrice = purchasePrice;
+    }
+  } else {
+    active.push({
+      name: info.name || "米ドル普通",
+      cash: info.cash ?? true,
+      currency: "JPY",
+      faceValue,
+      purchasePrice,
+      rate: "",
+      maturityDate: "",
+    });
+  }
+  stored.active = active;
+  writeBondStorage(stored);
+  loadBondRows();
+  return true;
+}
+
 function sumInvestmentsFromList(text) {
   const table = parseAssetTable(text);
   if (!table) {
@@ -2747,8 +3007,14 @@ function sumInvestmentsFromList(text) {
     const type = row[typeIndex] || "";
     const name = nameIndex !== null ? row[nameIndex] || "" : "";
     const category = categoryIndex !== null ? row[categoryIndex] || "" : "";
+    const rowText = row.map((cell) => String(cell ?? "")).join(" ").trim();
     const amount = row[amountIndex] ? parseAmount(row[amountIndex]) : null;
     if (amount === null) {
+      return;
+    }
+
+    if (isUsdDepositRow({ type, category, name, rowText })) {
+      totals.usd += amount;
       return;
     }
 
@@ -2762,10 +3028,6 @@ function sumInvestmentsFromList(text) {
     }
     if (/DC|確定拠出|ベネフィット|あおぞら/.test(name)) {
       totals.dc += amount;
-      return;
-    }
-    if (/代表口座-米ドル普通\s*住信SBIネット銀行/.test(name)) {
-      totals.usd += amount;
       return;
     }
     if (/株式/.test(type)) {
@@ -2852,6 +3114,12 @@ function sumInvestmentsFromText(text) {
       return;
     }
 
+    if (isUsdDepositRow({ name: line, type: currentSection })) {
+      totals.usd += amount;
+      matched = true;
+      return;
+    }
+
     if (shouldReclassifyToOther({ name: line, type: currentSection })) {
       matched = true;
       return;
@@ -2863,11 +3131,6 @@ function sumInvestmentsFromText(text) {
     }
     if (/DC|確定拠出|ベネフィット|あおぞら/.test(line)) {
       totals.dc += amount;
-      matched = true;
-      return;
-    }
-    if (/代表口座-米ドル普通\s*住信SBIネット銀行/.test(line)) {
-      totals.usd += amount;
       matched = true;
       return;
     }
@@ -3881,7 +4144,10 @@ function getRowValuationYen(row, usdRate) {
 function getBondValuationTotalYen(stored, usdRate) {
   const active = stored?.active || [];
   return active.reduce(
-    (sum, row) => sum + getRowValuationYen(row, usdRate),
+    (sum, row) =>
+      isUsdDepositRow({ name: row?.name })
+        ? sum
+        : sum + getRowValuationYen(row, usdRate),
     0
   );
 }
@@ -3944,6 +4210,9 @@ function getCashReclassTotalYen() {
 function getBondCashReclassTotalYen(stored, usdRate) {
   const active = stored?.active || [];
   return active.reduce((sum, row) => {
+    if (isUsdDepositRow({ name: row?.name })) {
+      return sum;
+    }
     const isCash =
       row?.cash === true || row?.cash === "true" || row?.cash === "1";
     if (!isCash) {
@@ -4374,6 +4643,7 @@ function applyImportedData() {
   const listInvestmentTotals = sumInvestmentsFromList(assetText);
   const summaryInvestmentTotals = sumInvestmentsFromSummary(summaryText);
   const importedAssets = extractImportedAssetRows(assetText);
+  const usdDeposit = extractUsdDepositFromAssetList(assetText);
   let hasBondImport = importedAssets.bondRows.length > 0;
   const hasOtherImport = importedAssets.otherAssetRows.length > 0;
   const storedBondsSnapshot = readBondStorage();
@@ -4429,6 +4699,9 @@ function applyImportedData() {
     writeOtherAssetsStorage(mergedOther);
     loadOtherAssetRows();
   }
+  if (usdDeposit) {
+    upsertUsdDepositBondRow(usdDeposit);
+  }
 
   if (summaryTotal !== null) {
     currentAssetsInput.value = Math.round(summaryTotal);
@@ -4452,7 +4725,14 @@ function applyImportedData() {
     if (!hasOtherImport) {
       balanceUsdInput.value = Math.round(investmentTotals.usd);
     }
+    if (usdDeposit && Number.isFinite(usdDeposit.amountYen)) {
+      balanceUsdInput.value = Math.round(usdDeposit.amountYen);
+    }
     balanceDcInput.value = Math.round(investmentTotals.dc);
+    initializeAdjustments({ applyToBalance: true, includeBonds: false });
+    persistInputsToStorage();
+  } else if (usdDeposit && Number.isFinite(usdDeposit.amountYen)) {
+    balanceUsdInput.value = Math.round(usdDeposit.amountYen);
     initializeAdjustments({ applyToBalance: true, includeBonds: false });
     persistInputsToStorage();
   }
@@ -4512,6 +4792,84 @@ function handleExportCsv() {
   downloadCsv(rows, context.birthDate, { todayRow: todaySnapshot });
 }
 
+function handleOpenCsv() {
+  const context = getSimulationContext();
+  if (!context) {
+    window.alert("入力値を確認してください。");
+    return;
+  }
+
+  const annualStartDate = getMonthStart(context.today);
+  const annualMonthsRemaining = fullMonthsBetween(
+    annualStartDate,
+    addYears(context.birthDate, 100)
+  );
+  const rows = simulateAnnualSeries({
+    startDate: annualStartDate,
+    monthsRemaining: annualMonthsRemaining,
+    annualRate: context.annualRate,
+    categoryRates: context.categoryRates,
+    retirementAge: context.retirementMonthIndex,
+    retirementIncomeEndAge: context.retirementIncomeEndMonthIndex,
+    monthlyNetCash: context.incomeTotal - context.expenseTotal,
+    retirementMonthlyNetCash:
+      context.retireBaseIncome + context.ongoingIncome - context.retireExpenseTotal,
+    postRetirementMonthlyNetCash:
+      context.pensionIncomeTotal +
+      context.ongoingIncome -
+      context.retireExpenseTotal,
+    contributionSchedule: context.contributionSchedule,
+    categories: context.categories,
+    bondMaturities: context.bondMaturities,
+    usdRate: context.usdRate,
+    pensionPlanState: context.pensionPlanState,
+  });
+
+  if (!rows.length) {
+    window.alert("出力できるデータがありません。");
+    return;
+  }
+
+  const header = [
+    "日付",
+    "年齢",
+    "合計（円）",
+    "預金・現金・暗号資産（円）",
+    "株式(現物)（円）",
+    "投資信託（円）",
+    "債券（円）",
+    "保険（円）",
+    "年金（円）",
+  ];
+  const displayRows = [];
+  const pushRow = (row) => {
+    displayRows.push([
+      formatDate(row.date),
+      formatAgeYears(context.birthDate, row.date),
+      toCsvNumber(row.total),
+      toCsvNumber(row.cash),
+      toCsvNumber(row.stocks),
+      toCsvNumber(row.funds),
+      toCsvNumber(row.bonds),
+      toCsvNumber(row.insurance),
+      toCsvNumber(row.dc || 0),
+    ]);
+  };
+
+  const todaySnapshot = {
+    date: context.today,
+    total: sumCategoryTotal(context.categories),
+    ...context.categories,
+  };
+  pushRow(todaySnapshot);
+  rows.forEach((row) => pushRow(row));
+  openSpreadsheetView({
+    title: "年次CSV",
+    headers: header,
+    rows: displayRows,
+  });
+}
+
 function getSimulationContext() {
   const birthDate = parseDate(birthDateInput.value);
   const currentAssets = parseNumber(currentAssetsInput.value);
@@ -4554,6 +4912,7 @@ function getSimulationContext() {
         ? defaultMonthlyRate
         : toMonthlyRate(rateInsurance / 100),
     dc: 0,
+    usd: 0,
     other: 0,
   };
   const storedBonds = readBondStorage();
@@ -4594,6 +4953,7 @@ function getSimulationContext() {
     bonds: initial.bonds,
     insurance: initial.insurance,
     dc: initial.dc,
+    usd: initial.usd,
     other: initial.other,
   };
   const pensionPlanState = buildPensionPlanState(
@@ -4700,8 +5060,14 @@ function updateStatementYearOptions(statementRows) {
     if (exportBalanceSheetDecadeButton) {
       exportBalanceSheetDecadeButton.disabled = true;
     }
+    if (openBalanceSheetDecadeButton) {
+      openBalanceSheetDecadeButton.disabled = true;
+    }
     if (exportProfitLossDecadeButton) {
       exportProfitLossDecadeButton.disabled = true;
+    }
+    if (openProfitLossDecadeButton) {
+      openProfitLossDecadeButton.disabled = true;
     }
     return;
   }
@@ -4733,8 +5099,14 @@ function updateStatementYearOptions(statementRows) {
   if (exportBalanceSheetDecadeButton) {
     exportBalanceSheetDecadeButton.disabled = false;
   }
+  if (openBalanceSheetDecadeButton) {
+    openBalanceSheetDecadeButton.disabled = false;
+  }
   if (exportProfitLossDecadeButton) {
     exportProfitLossDecadeButton.disabled = false;
+  }
+  if (openProfitLossDecadeButton) {
+    openProfitLossDecadeButton.disabled = false;
   }
 }
 
@@ -4912,6 +5284,7 @@ function buildBalanceSheetCsvLine(row, birthDate) {
     row.start.bonds,
     row.start.insurance,
     row.start.dc,
+    row.start.usd,
     row.start.other,
   ]);
   const cashIncomeExpression = buildMultiplicationExpression([
@@ -5021,6 +5394,7 @@ function buildProfitLossCsvLine(row, birthDate) {
     row.start.bonds,
     row.start.insurance,
     row.start.dc,
+    row.start.usd,
     row.start.other,
   ]);
   const cashIncomeExpression = buildMultiplicationExpression([
@@ -5125,6 +5499,74 @@ function handleExportBalanceSheetDecade() {
   );
 }
 
+function handleOpenBalanceSheetDecade() {
+  const statementRows = buildStatementRows({ showAlert: true });
+  if (!statementRows) {
+    return;
+  }
+  const range = getSelectedYearRange(statementRows);
+  if (!range) {
+    window.alert("対象年度のデータがありません。");
+    return;
+  }
+  const rangeRows = getStatementRowsInRange(
+    statementRows,
+    range.startYear,
+    range.endYear
+  );
+  if (!rangeRows.length) {
+    window.alert("対象の期間データがありません。");
+    return;
+  }
+  const birthDate = parseDate(birthDateInput.value);
+  const header = [
+    "年度",
+    "年齢",
+    "対象月数",
+    "期首合計（円）",
+    "期首預金・現金・暗号資産（円）",
+    "期首株式(現物)（円）",
+    "期首投資信託（円）",
+    "期首債券（円）",
+    "期首保険（円）",
+    "期首年金（円）",
+    "期末合計（円）",
+    "期末預金・現金・暗号資産（円）",
+    "期末株式(現物)（円）",
+    "期末投資信託（円）",
+    "期末債券（円）",
+    "期末保険（円）",
+    "期末年金（円）",
+  ];
+  const rows = rangeRows.map((row) => {
+    const periodStartDate = getPeriodStartDate(row.date, row.months);
+    return [
+      row.year,
+      formatAgeYears(birthDate, periodStartDate),
+      toCsvNumber(row.months),
+      toCsvNumber(row.start.total),
+      toCsvNumber(row.start.cash),
+      toCsvNumber(row.start.stocks),
+      toCsvNumber(row.start.funds),
+      toCsvNumber(row.start.bonds),
+      toCsvNumber(row.start.insurance),
+      toCsvNumber(row.start.dc),
+      toCsvNumber(row.end.total),
+      toCsvNumber(row.end.cash),
+      toCsvNumber(row.end.stocks),
+      toCsvNumber(row.end.funds),
+      toCsvNumber(row.end.bonds),
+      toCsvNumber(row.end.insurance),
+      toCsvNumber(row.end.dc),
+    ];
+  });
+  openSpreadsheetView({
+    title: `期間指定貸借対照表 ${rangeRows[0].year}年〜${rangeRows[rangeRows.length - 1].year}年`,
+    headers: header,
+    rows,
+  });
+}
+
 function handleExportProfitLossDecade() {
   const statementRows = buildStatementRows({ showAlert: true });
   if (!statementRows) {
@@ -5153,6 +5595,60 @@ function handleExportProfitLossDecade() {
     csv,
     `LifeWealth100_profit_loss_${rangeRows[0].year}_to_${rangeRows[rangeRows.length - 1].year}.csv`
   );
+}
+
+function handleOpenProfitLossDecade() {
+  const statementRows = buildStatementRows({ showAlert: true });
+  if (!statementRows) {
+    return;
+  }
+  const range = getSelectedYearRange(statementRows);
+  if (!range) {
+    window.alert("対象年度のデータがありません。");
+    return;
+  }
+  const rangeRows = getStatementRowsInRange(
+    statementRows,
+    range.startYear,
+    range.endYear
+  );
+  if (!rangeRows.length) {
+    window.alert("対象の期間データがありません。");
+    return;
+  }
+  const birthDate = parseDate(birthDateInput.value);
+  const header = [
+    "年度",
+    "年齢",
+    "対象月数",
+    "収入（円）",
+    "支出（円）",
+    "収支（円）",
+    "運用益（円）",
+    "資産増減（円）",
+    "期首合計（円）",
+    "期末合計（円）",
+  ];
+  const rows = rangeRows.map((row) => {
+    const periodStartDate = getPeriodStartDate(row.date, row.months);
+    return [
+      row.year,
+      formatAgeYears(birthDate, periodStartDate),
+      toCsvNumber(row.months),
+      toCsvNumber(row.income),
+      toCsvNumber(row.expense),
+      toCsvNumber(row.netCash),
+      toCsvNumber(row.investmentGain),
+      toCsvNumber(row.totalChange),
+      toCsvNumber(row.start.total),
+      toCsvNumber(row.end.total),
+    ];
+  });
+  openSpreadsheetView({
+    title: `期間指定損益計算書 ${rangeRows[0].year}年〜${rangeRows[rangeRows.length - 1].year}年`,
+    headers: header,
+    rows,
+  });
 }
 
 function render() {
@@ -5325,6 +5821,7 @@ function render() {
             bonds: initial.bonds,
             insurance: initial.insurance,
             dc: initial.dc,
+            usd: initial.usd,
             other: initial.other,
           };
           negativeRow = findNegativeCashMonthDetailed({
@@ -5583,16 +6080,31 @@ importButton.addEventListener("click", applyImportedData);
 if (exportButton) {
   exportButton.addEventListener("click", handleExportCsv);
 }
+if (openCsvButton) {
+  openCsvButton.addEventListener("click", handleOpenCsv);
+}
 if (exportBalanceSheetDecadeButton) {
   exportBalanceSheetDecadeButton.addEventListener(
     "click",
     handleExportBalanceSheetDecade
   );
 }
+if (openBalanceSheetDecadeButton) {
+  openBalanceSheetDecadeButton.addEventListener(
+    "click",
+    handleOpenBalanceSheetDecade
+  );
+}
 if (exportProfitLossDecadeButton) {
   exportProfitLossDecadeButton.addEventListener(
     "click",
     handleExportProfitLossDecade
+  );
+}
+if (openProfitLossDecadeButton) {
+  openProfitLossDecadeButton.addEventListener(
+    "click",
+    handleOpenProfitLossDecade
   );
 }
 if (exportSyncFolderButton) {
