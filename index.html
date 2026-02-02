@@ -225,7 +225,7 @@
           <h3>年金生活時の収入</h3>
           <label>
             年金収入
-            <input class="pension-income-input" type="number" min="0" step="1000" inputmode="numeric">
+            <input id="pensionIncome" class="pension-income-input" data-income-key="pension" type="number" min="0" step="1000" inputmode="numeric">
           </label>
           <div class="income-summary">
             <span>年金生活時の月平均収入</span>
@@ -586,6 +586,7 @@
           </div>
         </div>
         <div class="bond-actions">
+          <button id="bondDetailBack" type="button">資産残高一覧へ戻る</button>
           <span class="bond-total" id="bondCashReclassTotal">現金から引く合計: -</span>
           <span class="bond-total" id="bondCombinedTotal">債券・その他資産 合計: -</span>
         </div>
@@ -643,6 +644,7 @@
           </table>
         </div>
         <button id="addInsurancePlanRow" type="button">保険商品を追加</button>
+        <button id="insuranceDetailBack" type="button">資産残高一覧へ戻る</button>
       </section>
 
       <section class="card page" data-page="pension-detail">
@@ -687,6 +689,7 @@
           </div>
         </div>
         <button id="addPensionChangeRow" type="button">変更を追加</button>
+        <button id="pensionDetailBack" type="button">資産残高一覧へ戻る</button>
       </section>
 
       <section class="card page" data-page="asset-detail">

@@ -168,12 +168,15 @@ const assetDetailYearSelect = document.getElementById("assetDetailYear");
 const assetDetailTableBody = document.getElementById("assetDetailTableBody");
 const assetDetailBackButton = document.getElementById("assetDetailBack");
 const bondDetailButton = document.getElementById("bondDetailButton");
+const bondDetailBackButton = document.getElementById("bondDetailBack");
 const bondRateAverageDisplay = document.getElementById("bondRateAverageDisplay");
 const insuranceDetailButton = document.getElementById("insuranceDetailButton");
+const insuranceDetailBackButton = document.getElementById("insuranceDetailBack");
 const insuranceCurrentAmount = document.getElementById("insuranceCurrentAmount");
 const insurancePlanBody = document.getElementById("insurancePlanBody");
 const addInsurancePlanRowButton = document.getElementById("addInsurancePlanRow");
 const pensionDetailButton = document.getElementById("pensionDetailButton");
+const pensionDetailBackButton = document.getElementById("pensionDetailBack");
 const pensionCurrentAmount = document.getElementById("pensionCurrentAmount");
 const pensionPlanBody = document.getElementById("pensionPlanBody");
 const addPensionPlanRowButton = document.getElementById("addPensionPlanRow");
@@ -6294,9 +6297,19 @@ if (bondDetailButton) {
     setActivePage("bond-input");
   });
 }
+if (bondDetailBackButton) {
+  bondDetailBackButton.addEventListener("click", () => {
+    setActivePage("investment");
+  });
+}
 if (insuranceDetailButton) {
   insuranceDetailButton.addEventListener("click", () => {
     setActivePage("insurance-detail");
+  });
+}
+if (insuranceDetailBackButton) {
+  insuranceDetailBackButton.addEventListener("click", () => {
+    setActivePage("investment");
   });
 }
 if (addInsurancePlanRowButton) {
@@ -6308,6 +6321,11 @@ if (addInsurancePlanRowButton) {
 if (pensionDetailButton) {
   pensionDetailButton.addEventListener("click", () => {
     setActivePage("pension-detail");
+  });
+}
+if (pensionDetailBackButton) {
+  pensionDetailBackButton.addEventListener("click", () => {
+    setActivePage("investment");
   });
 }
 if (cashDetailButton) {

@@ -41,9 +41,12 @@ self.addEventListener("fetch", (event) => {
   const isHtmlRequest =
     event.request.mode === "navigate" ||
     (event.request.headers.get("accept") || "").includes("text/html");
+  const isCriticalAsset = ["script", "style"].includes(
+    event.request.destination
+  );
   const isSameOrigin = new URL(event.request.url).origin === self.location.origin;
 
-  if (isHtmlRequest) {
+  if (isHtmlRequest || isCriticalAsset) {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
