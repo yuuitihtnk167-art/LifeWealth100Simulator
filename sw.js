@@ -1,4 +1,4 @@
-const CACHE_NAME = "lifewealth100-v2";
+const CACHE_NAME = "lifewealth100-v3";
 const ASSETS = [
   "./",
   "index.html",
@@ -13,7 +13,11 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(CACHE_NAME)
-      .then((cache) => cache.addAll(ASSETS))
+      .then((cache) =>
+        cache.addAll(
+          ASSETS.map((asset) => new Request(asset, { cache: "reload" }))
+        )
+      )
       .then(() => self.skipWaiting())
   );
 });
@@ -48,7 +52,7 @@ self.addEventListener("fetch", (event) => {
 
   if (isHtmlRequest || isCriticalAsset) {
     event.respondWith(
-      fetch(event.request)
+      fetch(new Request(event.request, { cache: "no-store" }))
         .then((response) => {
           if (isSameOrigin && response && response.status === 200) {
             const responseClone = response.clone();

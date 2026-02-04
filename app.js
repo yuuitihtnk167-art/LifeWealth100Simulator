@@ -6500,7 +6500,7 @@ updateLastUpdatedFromPush();
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker
-      .register("sw.js")
+      .register("sw.js", { updateViaCache: "none" })
       .then((registration) => {
         if (typeof registration.update === "function") {
           registration.update();
