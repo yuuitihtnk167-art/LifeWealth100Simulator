@@ -166,6 +166,7 @@ const assetDetailTitle = document.getElementById("assetDetailTitle");
 const assetDetailSubtitle = document.getElementById("assetDetailSubtitle");
 const assetDetailYearSelect = document.getElementById("assetDetailYear");
 const assetDetailTableBody = document.getElementById("assetDetailTableBody");
+const assetDetailYearDelta = document.getElementById("assetDetailYearDelta");
 const assetDetailBackButton = document.getElementById("assetDetailBack");
 const bondDetailButton = document.getElementById("bondDetailButton");
 const bondDetailBackButton = document.getElementById("bondDetailBack");
@@ -5341,6 +5342,9 @@ function renderAssetDetail() {
   if (!assetDetailTitle || !assetDetailSubtitle || !assetDetailTableBody) {
     return;
   }
+  if (assetDetailYearDelta) {
+    assetDetailYearDelta.textContent = "-";
+  }
   const context = getSimulationContext();
   if (!context) {
     assetDetailTitle.textContent = "資産の月次推移";
@@ -5391,8 +5395,18 @@ function renderAssetDetail() {
   });
 
   const categoryKey = ASSET_CATEGORY_KEYS[assetKey] || assetKey;
-  const rowsForYear = monthlyRows.filter(
-    (row) => row.date.getFullYear() === assetDetailState.year
+  const baseValue = Number.isFinite(context.categories?.[categoryKey])
+    ? context.categories[categoryKey]
+    : 0;
+  let previousValue = Number.isFinite(baseValue) ? baseValue : null;
+  const rowsWithDelta = monthlyRows.map((row) => {
+    const value = Number.isFinite(row[categoryKey]) ? row[categoryKey] : 0;
+    const delta = previousValue === null ? null : value - previousValue;
+    previousValue = value;
+    return { row, value, delta };
+  });
+  const rowsForYear = rowsWithDelta.filter(
+    (entry) => entry.row.date.getFullYear() === assetDetailState.year
   );
   assetDetailTableBody.innerHTML = "";
   if (!rowsForYear.length) {
@@ -5404,11 +5418,12 @@ function renderAssetDetail() {
     assetDetailTableBody.appendChild(emptyRow);
     return;
   }
-  let previousValue = null;
-  rowsForYear.forEach((row) => {
-    const value = Number.isFinite(row[categoryKey]) ? row[categoryKey] : 0;
-    const delta = previousValue === null ? null : value - previousValue;
-    previousValue = value;
+  let totalDelta = 0;
+  rowsForYear.forEach((entry) => {
+    const { row, value, delta } = entry;
+    if (delta !== null) {
+      totalDelta += delta;
+    }
     const monthLabel = `${row.date.getFullYear()}-${String(
       row.date.getMonth() + 1
     ).padStart(2, "0")}`;
@@ -5425,6 +5440,11 @@ function renderAssetDetail() {
     tr.appendChild(deltaCell);
     assetDetailTableBody.appendChild(tr);
   });
+  if (assetDetailYearDelta) {
+    assetDetailYearDelta.textContent = yenFormatter.format(
+      Math.round(totalDelta)
+    );
+  }
 }
 
 function openAssetDetail(assetKey, year) {
