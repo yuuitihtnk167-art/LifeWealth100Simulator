@@ -223,6 +223,12 @@ button:hover {
   font-size: 13px;
 }
 
+.file-status {
+  margin: -8px 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .helper-text {
   margin: 0 0 16px;
   color: var(--muted);

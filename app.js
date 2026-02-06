@@ -32,6 +32,10 @@ const currentAssetsInput = document.getElementById("currentAssets");
 const retirementAgeInput = document.getElementById("retirementAge");
 const assetDataInput = document.getElementById("assetData");
 const summaryDataInput = document.getElementById("summaryData");
+const assetFileInput = document.getElementById("assetFile");
+const summaryFileInput = document.getElementById("summaryFile");
+const assetFileStatus = document.getElementById("assetFileStatus");
+const summaryFileStatus = document.getElementById("summaryFileStatus");
 const importButton = document.getElementById("applyImport");
 const exportButton = document.getElementById("exportCsv");
 const openCsvButton = document.getElementById("openCsv");
@@ -2441,6 +2445,271 @@ function parseAssetTable(text) {
   return { headers, dataRows };
 }
 
+function setFileStatus(target, message) {
+  if (target) {
+    target.textContent = message;
+  }
+}
+
+function getFileExtension(name) {
+  if (!name) {
+    return "";
+  }
+  const parts = name.split(".");
+  return parts.length > 1 ? parts.pop().toLowerCase() : "";
+}
+
+function parseGsheetMetadata(text) {
+  if (!text) {
+    return null;
+  }
+  try {
+    const data = JSON.parse(text);
+    if (!data || typeof data !== "object") {
+      return null;
+    }
+    const url = typeof data.url === "string" ? data.url : "";
+    const docId = typeof data.doc_id === "string" ? data.doc_id : "";
+    const resourceId =
+      typeof data.resource_id === "string" ? data.resource_id : "";
+    const mimeType =
+      typeof data.mime_type === "string" ? data.mime_type : "";
+    if (!url && !docId && !resourceId) {
+      return null;
+    }
+    return { url, docId, resourceId, mimeType };
+  } catch (error) {
+    return null;
+  }
+}
+
+function extractSpreadsheetId(metadata) {
+  if (!metadata) {
+    return null;
+  }
+  if (metadata.docId) {
+    return metadata.docId;
+  }
+  if (metadata.resourceId) {
+    const match = metadata.resourceId.match(/spreadsheet:([a-zA-Z0-9-_]+)/);
+    if (match) {
+      return match[1];
+    }
+  }
+  if (metadata.url) {
+    const match = metadata.url.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    if (match) {
+      return match[1];
+    }
+  }
+  return null;
+}
+
+function extractSpreadsheetGid(metadata) {
+  if (!metadata || !metadata.url) {
+    return null;
+  }
+  const match = metadata.url.match(/[?&]gid=(\d+)/);
+  return match ? match[1] : null;
+}
+
+function buildGsheetExportUrl(id, gid) {
+  if (!id) {
+    return null;
+  }
+  const gidParam = gid ? `&gid=${gid}` : "";
+  return `https://docs.google.com/spreadsheets/d/${id}/export?format=tsv${gidParam}`;
+}
+
+function scoreImportText(text) {
+  if (!text) {
+    return -1000;
+  }
+  let score = 0;
+  if (text.includes("<table")) {
+    score += 6;
+  }
+  const lines = text.split(/\r?\n/).slice(0, 20);
+  if (detectDelimiter(lines)) {
+    score += 4;
+  }
+  if (/[日付合計資産評価額]/.test(text)) {
+    score += 2;
+  }
+  const nullCount = (text.match(/\u0000/g) || []).length;
+  const replacementCount = (text.match(/\uFFFD/g) || []).length;
+  score -= nullCount * 2;
+  score -= replacementCount;
+  return score;
+}
+
+function decodeImportArrayBuffer(buffer) {
+  const encodings = ["utf-8", "shift_jis", "utf-16le"];
+  let bestText = "";
+  let bestScore = -Infinity;
+  encodings.forEach((encoding) => {
+    try {
+      const text = new TextDecoder(encoding).decode(buffer);
+      const score = scoreImportText(text);
+      if (score > bestScore) {
+        bestScore = score;
+        bestText = text;
+      }
+    } catch (error) {
+      // ignore invalid decoders
+    }
+  });
+  if (!bestText) {
+    bestText = new TextDecoder("utf-8").decode(buffer);
+  }
+  return bestText;
+}
+
+function extractTableFromHtml(html) {
+  if (!html || !html.includes("<table")) {
+    return null;
+  }
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const table = doc.querySelector("table");
+  if (!table) {
+    return null;
+  }
+  const rows = Array.from(table.querySelectorAll("tr"))
+    .map((row) => {
+      const cells = Array.from(row.querySelectorAll("th, td")).map((cell) =>
+        cell.textContent.replace(/\s+/g, " ").trim()
+      );
+      if (!cells.length) {
+        return null;
+      }
+      return cells.join("\t");
+    })
+    .filter(Boolean);
+  return rows.length ? rows.join("\n") : null;
+}
+
+function normalizeImportText(text) {
+  if (!text) {
+    return "";
+  }
+  const cleaned = text.replace(/\uFEFF/g, "");
+  const htmlTable = extractTableFromHtml(cleaned);
+  if (htmlTable) {
+    return htmlTable;
+  }
+  return cleaned;
+}
+
+function readFileAsArrayBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      resolve(reader.result);
+    };
+    reader.onerror = () => {
+      reject(new Error("file read failed"));
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function fetchGsheetTsv(metadata) {
+  const id = extractSpreadsheetId(metadata);
+  if (!id) {
+    return null;
+  }
+  const gid = extractSpreadsheetGid(metadata);
+  const url = buildGsheetExportUrl(id, gid);
+  if (!url) {
+    return null;
+  }
+  const response = await fetch(url, {
+    credentials: "include",
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    return null;
+  }
+  return response.text();
+}
+
+async function resolveImportTextFromFile(file) {
+  const buffer = await readFileAsArrayBuffer(file);
+  const decoded = decodeImportArrayBuffer(buffer);
+  const extension = getFileExtension(file.name);
+  const metadata = parseGsheetMetadata(decoded);
+  const isGsheet =
+    extension === "gsheet" ||
+    (metadata &&
+      metadata.mimeType &&
+      metadata.mimeType.includes("spreadsheet"));
+  if (isGsheet && metadata) {
+    const tsv = await fetchGsheetTsv(metadata);
+    if (tsv) {
+      return { text: normalizeImportText(tsv), note: "Google Sheets" };
+    }
+    return {
+      text: "",
+      error:
+        "Google Sheetsの読み込みに失敗しました。CSV/TSVで保存して選択してください。",
+    };
+  }
+  const normalized = normalizeImportText(decoded);
+  const note = normalized !== decoded && decoded.includes("<table")
+    ? "HTMLを変換"
+    : null;
+  return { text: normalized, note };
+}
+
+function isLikelyImportText(text, kind) {
+  if (!text) {
+    return false;
+  }
+  if (kind === "asset") {
+    return Boolean(parseAssetTable(text) || parseTable(text));
+  }
+  if (kind === "summary") {
+    return Boolean(parseTable(text));
+  }
+  return Boolean(parseTable(text));
+}
+
+async function handleImportFileSelection({
+  fileInput,
+  targetInput,
+  statusTarget,
+  kind,
+}) {
+  if (!fileInput || !targetInput) {
+    return;
+  }
+  const file = fileInput.files ? fileInput.files[0] : null;
+  if (!file) {
+    setFileStatus(statusTarget, "未選択");
+    return;
+  }
+  setFileStatus(statusTarget, `読み込み中: ${file.name}`);
+  try {
+    const result = await resolveImportTextFromFile(file);
+    if (result.error) {
+      targetInput.value = "";
+      markImportDirty();
+      setFileStatus(statusTarget, result.error);
+      return;
+    }
+    targetInput.value = result.text || "";
+    const valid = isLikelyImportText(result.text, kind);
+    const note = result.note ? `（${result.note}）` : "";
+    const suffix = valid ? "" : "（形式を確認してください）";
+    setFileStatus(statusTarget, `読み込み完了: ${file.name}${note}${suffix}`);
+    markImportDirty();
+  } catch (error) {
+    targetInput.value = "";
+    markImportDirty();
+    setFileStatus(statusTarget, "読み込みに失敗しました");
+  }
+}
+
 function findSummaryTotalIndex(headers) {
   const normalized = headers.map((header) => String(header || ""));
   const find = (regex, excludeRegex) => {
@@ -4804,6 +5073,10 @@ function sumInvestmentsFromSummary(text) {
 function applyImportedData() {
   const assetText = assetDataInput.value;
   const summaryText = summaryDataInput.value;
+  if (!assetText.trim() && !summaryText.trim()) {
+    importStatus.textContent = "ファイルを選択してください。";
+    return;
+  }
   const assetTotal = sumAssetsFromList(assetText);
   const summaryTotal = latestTotalFromSummary(summaryText);
   const listInvestmentTotals = sumInvestmentsFromList(assetText);
@@ -4909,7 +5182,7 @@ function applyImportedData() {
 
 function markImportDirty() {
   importDirty = true;
-  importStatus.textContent = "貼り付けデータは未反映です。";
+  importStatus.textContent = "ファイルは未反映です。";
 }
 
 function handleExportCsv() {
@@ -6467,6 +6740,32 @@ if (assetDetailYearSelect) {
 if (assetDetailBackButton) {
   assetDetailBackButton.addEventListener("click", () => {
     setActivePage("investment");
+  });
+}
+if (assetFileInput) {
+  assetFileInput.addEventListener("click", () => {
+    assetFileInput.value = "";
+  });
+  assetFileInput.addEventListener("change", () => {
+    handleImportFileSelection({
+      fileInput: assetFileInput,
+      targetInput: assetDataInput,
+      statusTarget: assetFileStatus,
+      kind: "asset",
+    });
+  });
+}
+if (summaryFileInput) {
+  summaryFileInput.addEventListener("click", () => {
+    summaryFileInput.value = "";
+  });
+  summaryFileInput.addEventListener("change", () => {
+    handleImportFileSelection({
+      fileInput: summaryFileInput,
+      targetInput: summaryDataInput,
+      statusTarget: summaryFileStatus,
+      kind: "summary",
+    });
   });
 }
 assetDataInput.addEventListener("input", markImportDirty);

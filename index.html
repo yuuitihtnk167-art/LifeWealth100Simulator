@@ -65,14 +65,19 @@
 
       <section class="card import page" data-page="import">
         <h2>マネーフォワード取り込み</h2>
+        <p class="helper-text">資産一覧と資産推移（月次）のファイルを選択して取り込みます。</p>
         <label>
-          資産一覧（表データを貼り付け）
-          <textarea id="assetData" rows="6" placeholder="カテゴリ,名称,数量,取得単価,現在値,評価額,評価損益,評価損益率,保有金融機関,取得日"></textarea>
+          資産一覧ファイル
+          <input id="assetFile" type="file" accept=".gsheet,.xls,.xlsx,.csv,.tsv,.txt,.html,.htm">
         </label>
+        <p class="file-status" id="assetFileStatus">未選択</p>
+        <textarea id="assetData" rows="6" placeholder="カテゴリ,名称,数量,取得単価,現在値,評価額,評価損益,評価損益率,保有金融機関,取得日" hidden aria-hidden="true"></textarea>
         <label>
-          資産推移（月次など）（表データを貼り付け）
-          <textarea id="summaryData" rows="4" placeholder="日付,合計,預金・現金・暗号資産,株式(現物),投資信託,債券,保険,年金,ポイント,その他の資産,詳細"></textarea>
+          資産推移（月次など）ファイル
+          <input id="summaryFile" type="file" accept=".gsheet,.xls,.xlsx,.csv,.tsv,.txt,.html,.htm">
         </label>
+        <p class="file-status" id="summaryFileStatus">未選択</p>
+        <textarea id="summaryData" rows="4" placeholder="日付,合計,預金・現金・暗号資産,株式(現物),投資信託,債券,保険,年金,ポイント,その他の資産,詳細" hidden aria-hidden="true"></textarea>
         <button id="applyImport" type="button">マネーフォワード取り込み</button>
         <label>
           USD/JPY（円）
