@@ -10,7 +10,7 @@
  * - bonds：債券・固定利付証券（評価額ベース、満期時に額面現金化）
  * - insurance：保険商品（複利計算により含み益を認識）
  * - dc：確定拠出年金・企業年金（拠出フェーズと給付フェーズで区分）
- * - usd：ドル積立（円換算・当初原価ベース）
+ * - usd：SBI米ドル残高（円換算・当初原価ベース）
  * - other：その他資産（当初原価ベース）
  * 
  * 運用益の認識：
@@ -92,6 +92,7 @@ const pensionIncomeInputs = Array.from(
 );
 const monthlyPensionIncome = document.getElementById("monthlyPensionIncome");
 const balanceCashInput = document.getElementById("balanceCash");
+const balancePointsInput = document.getElementById("balancePoints");
 const adjustCashInput = document.getElementById("adjustCash");
 const balanceStocksInput = document.getElementById("balanceStocks");
 const balanceFundsInput = document.getElementById("balanceFunds");
@@ -204,7 +205,7 @@ const ASSET_LABELS = {
   funds: "投資信託",
   bonds: "債券",
   insurance: "積立保険",
-  usd: "ドル積立",
+  usd: "SBIネット銀行米ドル残高",
   dc: "年金",
 };
 
@@ -233,10 +234,13 @@ const GITHUB_REPO_FALLBACK = {
   owner: "yuuitihtnk167-art",
   repo: "LifeWealth100Simulator",
 };
+const MANUAL_INPUTS_ONLY = true;
+const SYNC_EXCLUDED_INPUT_KEYS = new Set([]);
 const persistInputs = Array.from(document.querySelectorAll("input, textarea")).filter(
   (el) =>
     el.type !== "button" &&
     el.type !== "submit" &&
+    el.type !== "file" &&
     !el.dataset.noPersist
 );
 
@@ -504,10 +508,22 @@ function writeCashManualFlag(value) {
 }
 
 function getCashInputValue() {
-  if (!balanceCashInput || !cashInputManual) {
+  if (!balanceCashInput || (!MANUAL_INPUTS_ONLY && !cashInputManual)) {
     return null;
   }
   const raw = balanceCashInput.value;
+  if (raw === "" || raw === null || raw === undefined) {
+    return null;
+  }
+  const value = parseNumber(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+function getPointsInputValue() {
+  if (!balancePointsInput) {
+    return null;
+  }
+  const raw = balancePointsInput.value;
   if (raw === "" || raw === null || raw === undefined) {
     return null;
   }
@@ -520,18 +536,47 @@ function getCashAdjustment() {
 }
 
 function getSummaryBreakdownSafe() {
+  if (MANUAL_INPUTS_ONLY) {
+    return null;
+  }
   if (importDirty) {
     return null;
   }
   return getSummaryBreakdown(summaryDataInput.value);
 }
 
+function getImportedPointsValue() {
+  if (importDirty && !MANUAL_INPUTS_ONLY) {
+    return null;
+  }
+  const summary = getSummaryBreakdown(summaryDataInput.value);
+  if (!summary) {
+    return null;
+  }
+  return Number.isFinite(summary.points) ? summary.points : null;
+}
+
+function getImportedCashValue() {
+  if (importDirty && !MANUAL_INPUTS_ONLY) {
+    return null;
+  }
+  const summary = getSummaryBreakdown(summaryDataInput.value);
+  if (!summary) {
+    return null;
+  }
+  return Number.isFinite(summary.cash) ? summary.cash : null;
+}
+
 function resolveCashBaseWithoutPoints({
   cashInputValue,
+  importedCashValue,
   summaryBreakdown,
   currentAssetsValue,
   investmentTotal,
 }) {
+  if (Number.isFinite(importedCashValue)) {
+    return importedCashValue;
+  }
   if (Number.isFinite(cashInputValue)) {
     return cashInputValue;
   }
@@ -552,9 +597,17 @@ function resolveCashBaseWithoutPoints({
 
 function buildCashBreakdown({ summaryBreakdown, currentAssetsValue, investmentTotal }) {
   const cashInputValue = getCashInputValue();
-  const points = summaryBreakdown?.points || 0;
+  const importedCash = getImportedCashValue();
+  const manualPoints = getPointsInputValue();
+  const importedPoints = getImportedPointsValue();
+  const points = Number.isFinite(manualPoints)
+    ? manualPoints
+    : Number.isFinite(importedPoints)
+      ? importedPoints
+      : summaryBreakdown?.points || 0;
   const baseWithoutPoints = resolveCashBaseWithoutPoints({
     cashInputValue,
+    importedCashValue: importedCash,
     summaryBreakdown,
     currentAssetsValue,
     investmentTotal,
@@ -575,6 +628,21 @@ function buildCashBreakdown({ summaryBreakdown, currentAssetsValue, investmentTo
     baseWithPoints,
     cashFinal,
   };
+}
+
+function syncPointsInputFromImport() {
+  if (!balancePointsInput) {
+    return;
+  }
+  const importedPoints = getImportedPointsValue();
+  if (!Number.isFinite(importedPoints)) {
+    return;
+  }
+  const nextValue = String(Math.round(importedPoints));
+  if (balancePointsInput.value !== nextValue) {
+    balancePointsInput.value = nextValue;
+    persistInputsToStorage();
+  }
 }
 
 function updateCashDetailDisplay(breakdown) {
@@ -643,6 +711,47 @@ function getInsurancePlanTotalForDate(plans, atDate) {
   }, 0);
 }
 
+function parseMemoAmount(value) {
+  const text = String(value ?? "").replace(/,/g, "");
+  const match = text.match(/[+-]?\d+(?:\.\d+)?/);
+  if (!match) {
+    return null;
+  }
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getUsdJpyRate() {
+  const stored = readBondStorage();
+  return parseNumber(bondUsdRateInput?.value ?? stored.usdRate);
+}
+
+function updateInsuranceMemoConversionRow(memoInput, outputEl) {
+  if (!memoInput || !outputEl) {
+    return;
+  }
+  const amount = parseMemoAmount(memoInput.value);
+  const usdRate = getUsdJpyRate();
+  if (!Number.isFinite(amount) || !Number.isFinite(usdRate) || usdRate <= 0) {
+    outputEl.textContent = "";
+    return;
+  }
+  const yenValue = amount * usdRate;
+  const truncated = yenValue >= 0 ? Math.floor(yenValue) : Math.ceil(yenValue);
+  outputEl.textContent = yenFormatter.format(truncated);
+}
+
+function updateInsuranceMemoConversions() {
+  if (!insurancePlanBody) {
+    return;
+  }
+  insurancePlanBody.querySelectorAll("tr").forEach((row) => {
+    const memoInput = row.querySelector('input[data-key="memo"]');
+    const outputEl = row.querySelector(".insurance-memo-converted");
+    updateInsuranceMemoConversionRow(memoInput, outputEl);
+  });
+}
+
 function syncInsuranceContributionFromDetail(plans, atDate) {
   if (!contribInsuranceInput) {
     return false;
@@ -706,13 +815,11 @@ function getDividendMultiplier(startMonthIndex, monthIndexValue, annualRate) {
   if (!Number.isFinite(annualRate) || annualRate === 0) {
     return 1;
   }
-  const startYear = Math.floor(startMonthIndex / 12);
-  const currentYear = Math.floor(monthIndexValue / 12);
-  const years = currentYear - startYear;
-  if (years <= 0) {
+  const months = monthIndexValue - startMonthIndex;
+  if (months <= 0) {
     return 1;
   }
-  return Math.pow(1 + annualRate, years);
+  return Math.pow(1 + annualRate, months / 12);
 }
 
 function getDividendDelta(
@@ -733,6 +840,31 @@ function getDividendDelta(
     return 0;
   }
   return baseDividend * (multiplier - 1);
+}
+
+function shouldApplyAnnualDividend(startMonthIndex, monthIndexValue) {
+  return monthIndexValue > startMonthIndex && monthIndexValue % 12 === 11;
+}
+
+function getAnnualDividendBonus(
+  baseDividend,
+  startMonthIndex,
+  monthIndexValue,
+  annualRate
+) {
+  if (!shouldApplyAnnualDividend(startMonthIndex, monthIndexValue)) {
+    return 0;
+  }
+  const multiplier = getDividendMultiplier(
+    startMonthIndex,
+    monthIndexValue,
+    annualRate
+  );
+  if (multiplier === 1 || !Number.isFinite(baseDividend)) {
+    return 0;
+  }
+  const monthlyDelta = baseDividend * (multiplier - 1);
+  return monthlyDelta * 12;
 }
 
 function simulateToAge100({
@@ -761,15 +893,15 @@ function simulateToAge100({
       monthIndex,
       dividendYieldRate
     );
-    let cashFlow = monthlyNetCash + dividendDelta;
+    let cashFlow = monthlyNetCash;
     if (monthIndex >= retirementAge) {
-      cashFlow = retirementMonthlyNetCash + dividendDelta;
+      cashFlow = retirementMonthlyNetCash;
     }
     if (monthIndex >= retirementIncomeEndAge) {
-      cashFlow = postRetirementMonthlyNetCash + dividendDelta;
+      cashFlow = postRetirementMonthlyNetCash;
     }
     const investmentIncome = startAssets * monthlyRate;
-    assets = startAssets + cashFlow + investmentIncome;
+    assets = startAssets + cashFlow + dividendDelta + investmentIncome;
   }
 
   return { months, assets };
@@ -814,12 +946,12 @@ function simulateToAge100Detailed({
       monthIndexValue,
       dividendYieldRate
     );
-    let cashFlow = monthlyNetCash + dividendDelta;
+    let cashFlow = monthlyNetCash;
     if (monthIndexValue >= retirementAge) {
-      cashFlow = retirementMonthlyNetCash + dividendDelta;
+      cashFlow = retirementMonthlyNetCash;
     }
     if (monthIndexValue >= retirementIncomeEndAge) {
-      cashFlow = postRetirementMonthlyNetCash + dividendDelta;
+      cashFlow = postRetirementMonthlyNetCash;
     }
 
     investKeys.forEach((key) => {
@@ -829,7 +961,7 @@ function simulateToAge100Detailed({
       }
     });
 
-    data.cash += cashFlow;
+    data.cash += cashFlow + dividendDelta;
 
     contributionSchedule.forEach((item) => {
       if (monthIndexValue < item.endMonthIndex) {
@@ -1017,7 +1149,10 @@ function buildBondMaturitySchedule(bondMaturities, usdRate) {
       return;
     }
     const monthKey = monthIndex(bond.maturityDate);
-    const rate = bond.currency === "USD" ? usdRate : 1;
+    const isUsd = bond.currency === "USD";
+    const isCash =
+      bond.cash === true || bond.cash === "true" || bond.cash === "1";
+    const rate = isUsd ? usdRate : 1;
     const faceValue = Number.isFinite(bond.faceValue) ? bond.faceValue : 0;
     const bookValue = Number.isFinite(bond.bookValue)
       ? bond.bookValue
@@ -1027,9 +1162,22 @@ function buildBondMaturitySchedule(bondMaturities, usdRate) {
     if (!faceAmount && !bookAmount) {
       return;
     }
-    const entry = schedule.get(monthKey) || { faceValue: 0, bookValue: 0 };
-    entry.faceValue += faceAmount;
-    entry.bookValue += bookAmount;
+    if (isUsd && !isCash) {
+      return;
+    }
+    const entry = schedule.get(monthKey) || {
+      jpyFace: 0,
+      jpyBook: 0,
+      usdDepositFace: 0,
+      usdDepositBook: 0,
+    };
+    if (isUsd) {
+      entry.usdDepositFace += faceAmount;
+      entry.usdDepositBook += bookAmount;
+    } else {
+      entry.jpyFace += faceAmount;
+      entry.jpyBook += bookAmount;
+    }
     schedule.set(monthKey, entry);
   });
   return schedule;
@@ -1043,15 +1191,24 @@ function applyBondMaturities(data, schedule, monthIndexValue) {
   if (!entry) {
     return { faceValue: 0, bookValue: 0, gain: 0 };
   }
-  const faceAmount = entry.faceValue || 0;
-  const bookAmount = entry.bookValue || entry.faceValue || 0;
+  const jpyFace = entry.jpyFace || 0;
+  const jpyBook = entry.jpyBook || entry.jpyFace || 0;
+  const usdDepositFace = entry.usdDepositFace || 0;
+  const usdDepositBook = entry.usdDepositBook || entry.usdDepositFace || 0;
+  const faceAmount = jpyFace + usdDepositFace;
+  const bookAmount = jpyBook + usdDepositBook;
   if (!faceAmount && !bookAmount) {
     return { faceValue: 0, bookValue: 0, gain: 0 };
   }
   const before = data.bonds;
   const reducible = Math.min(before, bookAmount);
   data.bonds = before - reducible;
-  data.cash += faceAmount;
+  if (jpyFace) {
+    data.cash += jpyFace;
+  }
+  if (usdDepositFace) {
+    data.usd += usdDepositFace;
+  }
   if (bookAmount > before) {
     console.warn(
       `警告：債券償還時の評価額が残高を超えています（評価額${bookAmount}、残高${before}）。`
@@ -1377,6 +1534,14 @@ function sumCategoryTotal(data) {
     (data.usd || 0) +
     data.other
   );
+}
+
+function getBondDisplayValue(row) {
+  return Number.isFinite(row?.bonds) ? row.bonds : 0;
+}
+
+function getUsdDisplayValue(row) {
+  return Number.isFinite(row?.usd) ? row.usd : 0;
 }
 
 function simulateAnnualStatements({
@@ -1782,6 +1947,9 @@ function getInvestmentBalanceTotal() {
 }
 
 function updateCurrentAssetsFromInvestmentBalances() {
+  if (MANUAL_INPUTS_ONLY) {
+    return;
+  }
   if (!currentAssetsInput) {
     return;
   }
@@ -1821,6 +1989,9 @@ function updateCurrentAssetsFromInvestmentBalances() {
 }
 
 function syncCurrentAssetsFromCashInput() {
+  if (MANUAL_INPUTS_ONLY) {
+    return;
+  }
   if (!currentAssetsInput) {
     return;
   }
@@ -1905,6 +2076,7 @@ function buildInitialCategories(summaryBreakdown, currentAssets) {
     const cashReclassTotal = bondReclass + otherAssetsCashReclass;
     const baseValue = resolveCashBaseWithoutPoints({
       cashInputValue,
+      importedCashValue: getImportedCashValue(),
       summaryBreakdown,
       currentAssetsValue: total,
       investmentTotal,
@@ -1942,32 +2114,40 @@ function buildInitialCategories(summaryBreakdown, currentAssets) {
   const insurance = readBalanceValue(balanceInsuranceInput, 0);
   const dc = readBalanceValue(balanceDcInput, 0);
   const usd = readBalanceValue(balanceUsdInput, 0);
-  // 会計処理：初期現金残高の計算
-  // 現在資産 = 現金 + 各投資資産 の関係から現金を逆算
-  // 投資資産の合計が現在資産を超えないようにチェック（超える場合は警告）
   const other = 0;
   const investmentTotal = stocks + funds + bonds + insurance + dc + usd + other;
   const currentAssetsValue = parseNumber(currentAssets) || 0;
-  let cash = currentAssetsValue - investmentTotal;
-  
-  // 注：投資資産が現在資産を超える場合、現金がマイナスになることを警告
-  // これはユーザーが入力値を誤った場合に発生
-  if (cash < 0) {
-    console.warn(
-      `警告：投資資産の合計（${investmentTotal}）が現在資産総額（${currentAssetsValue}）を超えています。` +
-      `現金残高がマイナス（${cash}）になります。入力値を確認してください。`
-    );
-  }
-
   const cashInputValue = getCashInputValue();
+  const importedCash = getImportedCashValue();
+  const manualPoints = getPointsInputValue();
+  const importedPoints = getImportedPointsValue();
+  const points = Number.isFinite(manualPoints)
+    ? manualPoints
+    : Number.isFinite(importedPoints)
+      ? importedPoints
+      : 0;
+  let cashBaseWithoutPoints = null;
+  if (Number.isFinite(importedCash)) {
+    cashBaseWithoutPoints = importedCash;
+  } else if (Number.isFinite(cashInputValue)) {
+    cashBaseWithoutPoints = cashInputValue;
+  } else if (Number.isFinite(currentAssetsValue)) {
+    cashBaseWithoutPoints = currentAssetsValue - investmentTotal - points;
+  }
+  if (!Number.isFinite(cashBaseWithoutPoints)) {
+    cashBaseWithoutPoints = 0;
+  }
   const cashAdjustment = getCashAdjustment();
   const cashReclassTotal = getCashReclassTotalYen();
-  if (Number.isFinite(cashInputValue)) {
-    cash = cashInputValue - cashReclassTotal;
-  } else {
-    cash = Math.max(0, cash - cashReclassTotal);
+  const cash = cashBaseWithoutPoints + points - cashReclassTotal + cashAdjustment;
+  const total = cash + investmentTotal;
+
+  if (cash < 0) {
+    console.warn(
+      `警告：投資資産の合計（${investmentTotal}）と現金が一致しません。` +
+      `現金残高がマイナス（${cash}）です。入力値を確認してください。`
+    );
   }
-  cash += cashAdjustment;
 
   return {
     cash,
@@ -1979,7 +2159,7 @@ function buildInitialCategories(summaryBreakdown, currentAssets) {
     usd,
     points: 0,
     other,
-    total: currentAssetsValue,
+    total,
   };
 }
 
@@ -2199,7 +2379,7 @@ async function saveCsvWithPicker(csv, filename) {
 function downloadCsv(rows, birthDate, options = {}) {
   const todayRow = options.todayRow ?? null;
   const header =
-    "日付,年齢,合計（円）,預金・現金・暗号資産（円）,株式(現物)（円）,投資信託（円）,債券（円）,保険（円）,年金（円）";
+    "日付,年齢,合計（円）,預金・現金・暗号資産（円）,株式(現物)（円）,投資信託（円）,債券（円）,保険（円）,年金（円）,SBIネット銀行米ドル残高（円）";
   const buildLine = (row) =>
     [
       formatDate(row.date),
@@ -2208,9 +2388,10 @@ function downloadCsv(rows, birthDate, options = {}) {
       toCsvNumber(row.cash),
       toCsvNumber(row.stocks),
       toCsvNumber(row.funds),
-      toCsvNumber(row.bonds),
+      toCsvNumber(getBondDisplayValue(row)),
       toCsvNumber(row.insurance),
       toCsvNumber(row.dc || 0),
+      toCsvNumber(getUsdDisplayValue(row)),
     ].join(",");
   const lines = [];
   if (todayRow) {
@@ -2637,6 +2818,13 @@ async function resolveImportTextFromFile(file) {
   const buffer = await readFileAsArrayBuffer(file);
   const decoded = decodeImportArrayBuffer(buffer);
   const extension = getFileExtension(file.name);
+  if (extension === "xls" || extension === "xlsx") {
+    return {
+      text: "",
+      error:
+        "Excel形式（.xls/.xlsx）は未対応です。CSV/TSVで保存して選択してください。",
+    };
+  }
   const metadata = parseGsheetMetadata(decoded);
   const isGsheet =
     extension === "gsheet" ||
@@ -2728,7 +2916,7 @@ function findSummaryTotalIndex(headers) {
   );
 }
 
-function normalizeImportText(value) {
+function normalizeImportKey(value) {
   return String(value ?? "")
     .replace(/[\s　]+/g, "")
     .replace(/[‐‑‒–—−ー－]/g, "-")
@@ -2737,8 +2925,8 @@ function normalizeImportText(value) {
 
 function isUsdDepositRow({ type, category, name, rowText }) {
   const text = `${type || ""} ${category || ""} ${name || ""} ${rowText || ""}`;
-  const compact = normalizeImportText(text);
-  return /米ドル普通/.test(compact);
+  const compact = normalizeImportKey(text);
+  return /米ドル普通|sbi米ドル残高|sbi米ドル/.test(compact);
 }
 
 function shouldReclassifyToOther({ type, category, name }) {
@@ -2793,8 +2981,69 @@ function findAssetAmountIndex(headers) {
   );
 }
 
+function findAssetYenAmountIndex(headers) {
+  return findHeaderIndex(
+    headers,
+    /(評価額|時価|残高|金額|現在高|口座残高|保有額).*(円|JPY|円換算)/
+  );
+}
+
+function isAggregateRowText(text) {
+  return /合計|総計|小計/.test(String(text || ""));
+}
+
 function isYenHeader(header) {
   return /円|JPY|円換算/.test(String(header || ""));
+}
+
+function detectSectionHeader(line) {
+  const compact = String(line || "")
+    .replace(/[\s\u3000]+/g, "")
+    .trim();
+  if (!compact) {
+    return null;
+  }
+  if (/^株式(（.*）|\(.*\))?$/.test(compact)) {
+    return "stocks";
+  }
+  if (/^投資信託(（.*）|\(.*\))?$/.test(compact)) {
+    return "funds";
+  }
+  if (/^債券(（.*）|\(.*\))?$/.test(compact)) {
+    return "bonds";
+  }
+  if (/^保険(（.*）|\(.*\))?$/.test(compact)) {
+    return "insurance";
+  }
+  if (/^年金(（.*）|\(.*\))?$/.test(compact)) {
+    return "pension";
+  }
+  return null;
+}
+
+function hasSectionedAssetList(text) {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  return lines.some((line) => detectSectionHeader(line));
+}
+
+function extractRowAmount(cells) {
+  if (!Array.isArray(cells)) {
+    return null;
+  }
+  for (let i = cells.length - 1; i >= 0; i -= 1) {
+    const value = String(cells[i] ?? "").trim();
+    if (!value) {
+      continue;
+    }
+    const amount = parseAmount(value);
+    if (amount !== null) {
+      return amount;
+    }
+  }
+  return null;
 }
 
 function normalizeCurrencyLabel(value) {
@@ -3024,8 +3273,12 @@ function resolveNameFromRow(row, headers, indexes) {
 }
 
 function isImportCashReclass(text) {
+  const plain = String(text || "");
+  if (/株式|投資信託|投信|ファンド|ETF|REIT|債券|保険|年金|確定拠出|DC|iDeCo|イデコ/i.test(plain)) {
+    return false;
+  }
   return /預金|現金|暗号資産|仮想通貨|仕組預金|(米ドル|USD|外貨).*(普通|定期|現金)/i.test(
-    text
+    plain
   );
 }
 
@@ -3355,8 +3608,61 @@ function upsertUsdDepositBondRow(info) {
 }
 
 function sumInvestmentsFromList(text) {
+  if (hasSectionedAssetList(text)) {
+    return sumInvestmentsFromText(text);
+  }
   const table = parseAssetTable(text);
   if (!table) {
+    return sumInvestmentsFromText(text);
+  }
+
+  // Prefer section aggregates when the list is grouped by section headers.
+  const sectionTotals = {
+    stocks: null,
+    funds: null,
+    bonds: null,
+    insurance: null,
+    pension: null,
+  };
+  let currentSection = "";
+  table.dataRows.forEach((row) => {
+    const rowText = row.map((cell) => String(cell ?? "")).join(" ").trim();
+    const section = detectSectionHeader(rowText);
+    if (section) {
+      currentSection = section;
+      return;
+    }
+    if (!currentSection) {
+      return;
+    }
+    if (!isAggregateRowText(rowText)) {
+      return;
+    }
+    if (sectionTotals[currentSection] !== null) {
+      return;
+    }
+    const amount = extractRowAmount(row);
+    if (amount === null) {
+      return;
+    }
+    sectionTotals[currentSection] = amount;
+  });
+
+  const hasSectionTotals = Object.values(sectionTotals).some(
+    (value) => Number.isFinite(value)
+  );
+  if (hasSectionTotals) {
+    return {
+      stocks: sectionTotals.stocks || 0,
+      funds: sectionTotals.funds || 0,
+      bonds: sectionTotals.bonds || 0,
+      insurance: sectionTotals.insurance || 0,
+      usd: 0,
+      dc: sectionTotals.pension || 0,
+    };
+  }
+
+  if (hasSectionedAssetList(text)) {
     return sumInvestmentsFromText(text);
   }
 
@@ -3372,8 +3678,9 @@ function sumInvestmentsFromList(text) {
     table.headers,
     /大分類|中分類|小分類|分類|種別|カテゴリ|カテゴリー|科目/
   );
-  const amountIndex = findAssetAmountIndex(table.headers);
-  if (typeIndex === null || amountIndex === null) {
+  const amountIndex =
+    findAssetYenAmountIndex(table.headers) ?? findAssetAmountIndex(table.headers);
+  if (amountIndex === null) {
     return sumInvestmentsFromText(text);
   }
 
@@ -3387,12 +3694,16 @@ function sumInvestmentsFromList(text) {
   };
 
   table.dataRows.forEach((row) => {
-    const type = row[typeIndex] || "";
+    const type = typeIndex === null ? "" : row[typeIndex] || "";
     const name = nameIndex !== null ? row[nameIndex] || "" : "";
     const category = categoryIndex !== null ? row[categoryIndex] || "" : "";
     const rowText = row.map((cell) => String(cell ?? "")).join(" ").trim();
+    const classText = `${type} ${category} ${name} ${rowText}`;
     const amount = row[amountIndex] ? parseAmount(row[amountIndex]) : null;
     if (amount === null) {
+      return;
+    }
+    if (isAggregateRowText(rowText)) {
       return;
     }
 
@@ -3413,27 +3724,28 @@ function sumInvestmentsFromList(text) {
       totals.dc += amount;
       return;
     }
-    if (/株式/.test(type)) {
+    if (/株式|国内株|米国株|海外株/.test(classText)) {
       totals.stocks += amount;
       return;
     }
-    if (/投資信託/.test(type)) {
+    if (/投資信託|投信|ファンド|ETF|REIT/.test(classText)) {
       totals.funds += amount;
       return;
     }
-    if (/債券/.test(type)) {
+    if (/債券|国債|社債|外債|地方債|公社債|JGB|Treasury|T-?Bill|T-?Note/i.test(classText)) {
       totals.bonds += amount;
       return;
     }
-    if (/保険/.test(type)) {
+    if (/保険|生保|損保|年金保険|変額/.test(classText)) {
       totals.insurance += amount;
       return;
     }
-    if (/外貨/.test(type) || /米ドル/.test(name)) {
+    if (/外貨|米ドル|USD/.test(classText)) {
       totals.usd += amount;
       return;
     }
-    if (/年金/.test(type)) {
+    if (/年金|確定拠出|DC|iDeCo|イデコ/.test(classText)) {
+      totals.dc += amount;
       return;
     }
   });
@@ -3465,35 +3777,53 @@ function sumInvestmentsFromText(text) {
 
   let currentSection = "";
   let matched = false;
+  const sectionHasDetail = {
+    stocks: false,
+    funds: false,
+    bonds: false,
+    insurance: false,
+    pension: false,
+  };
+  const sectionAggregate = {
+    stocks: null,
+    funds: null,
+    bonds: null,
+    insurance: null,
+    pension: null,
+  };
+  const sectionDetail = {
+    stocks: 0,
+    funds: 0,
+    bonds: 0,
+    insurance: 0,
+    pension: 0,
+  };
 
   lines.forEach((line) => {
-    if (/株式/.test(line)) {
-      currentSection = "stocks";
-      return;
-    }
-    if (/投資信託/.test(line)) {
-      currentSection = "funds";
-      return;
-    }
-    if (/債券/.test(line)) {
-      currentSection = "bonds";
-      return;
-    }
-    if (/保険/.test(line)) {
-      currentSection = "insurance";
-      return;
-    }
-    if (/年金/.test(line)) {
-      currentSection = "pension";
+    const section = detectSectionHeader(line);
+    if (section) {
+      currentSection = section;
       return;
     }
 
-    const amountMatch = line.match(/([+-]?\d[\d,]*)\s*円/);
+    const isAggregate = isAggregateRowText(line);
+    const amountMatch = isAggregate
+      ? line.match(/([+-]?\d[\d,]*)/)
+      : line.match(/([+-]?\d[\d,]*)\s*円/);
     if (!amountMatch) {
       return;
     }
     const amount = parseAmount(amountMatch[1]);
     if (amount === null) {
+      return;
+    }
+    if (isAggregate && sectionAggregate[currentSection] === null) {
+      sectionAggregate[currentSection] = amount;
+      matched = true;
+      return;
+    }
+    if (sectionAggregate[currentSection] !== null) {
+      // Prefer aggregate totals when available.
       return;
     }
 
@@ -3524,27 +3854,64 @@ function sumInvestmentsFromText(text) {
     }
 
     if (currentSection === "stocks") {
-      totals.stocks += amount;
+      sectionDetail.stocks += amount;
+      if (!isAggregate) {
+        sectionHasDetail.stocks = true;
+      }
       matched = true;
       return;
     }
     if (currentSection === "funds") {
-      totals.funds += amount;
+      sectionDetail.funds += amount;
+      if (!isAggregate) {
+        sectionHasDetail.funds = true;
+      }
       matched = true;
       return;
     }
     if (currentSection === "bonds") {
-      totals.bonds += amount;
+      sectionDetail.bonds += amount;
+      if (!isAggregate) {
+        sectionHasDetail.bonds = true;
+      }
       matched = true;
       return;
     }
     if (currentSection === "insurance") {
-      totals.insurance += amount;
+      sectionDetail.insurance += amount;
+      if (!isAggregate) {
+        sectionHasDetail.insurance = true;
+      }
       matched = true;
       return;
     }
     if (currentSection === "pension") {
+      sectionDetail.pension += amount;
+      if (!isAggregate) {
+        sectionHasDetail.pension = true;
+      }
+      matched = true;
       return;
+    }
+  });
+
+  ["stocks", "funds", "bonds", "insurance", "pension"].forEach((key) => {
+    const aggregate = sectionAggregate[key];
+    if (Number.isFinite(aggregate)) {
+      if (key === "pension") {
+        totals.dc += aggregate;
+      } else {
+        totals[key] += aggregate;
+      }
+      return;
+    }
+    const detail = sectionDetail[key];
+    if (Number.isFinite(detail) && detail !== 0) {
+      if (key === "pension") {
+        totals.dc += detail;
+      } else {
+        totals[key] += detail;
+      }
     }
   });
 
@@ -3653,6 +4020,9 @@ function loadPersistedInputs() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     }
     persistInputs.forEach((el, index) => {
+      if (el.type === "file") {
+        return;
+      }
       const key = getPersistKey(el, index);
       if (Object.prototype.hasOwnProperty.call(data, key)) {
         el.value = data[key];
@@ -3666,6 +4036,26 @@ function loadPersistedInputs() {
   } catch {
     // Ignore storage failures.
   }
+}
+
+function applyInputSnapshot(data) {
+  if (!data || typeof data !== "object") {
+    return;
+  }
+  persistInputs.forEach((el, index) => {
+    if (el.type === "file") {
+      return;
+    }
+    const key = getPersistKey(el, index);
+    if (Object.prototype.hasOwnProperty.call(data, key)) {
+      el.value = data[key];
+      return;
+    }
+    const legacyKey = `${el.className || el.tagName}:${index}`;
+    if (Object.prototype.hasOwnProperty.call(data, legacyKey)) {
+      el.value = data[legacyKey];
+    }
+  });
 }
 
 function createBondRow(data = {}) {
@@ -4000,6 +4390,9 @@ function createInsurancePlanRow(data = {}) {
   memoInput.dataset.key = "memo";
   memoInput.value = data.memo ?? "";
 
+  const memoConverted = document.createElement("span");
+  memoConverted.className = "insurance-memo-converted";
+
   const removeButton = document.createElement("button");
   removeButton.type = "button";
   removeButton.textContent = "削除";
@@ -4013,6 +4406,9 @@ function createInsurancePlanRow(data = {}) {
     td.appendChild(input);
     return td;
   });
+  const memoConvertedCell = document.createElement("td");
+  memoConvertedCell.appendChild(memoConverted);
+  cells.push(memoConvertedCell);
   const actionCell = document.createElement("td");
   actionCell.className = "insurance-action";
   actionCell.appendChild(removeButton);
@@ -4025,6 +4421,13 @@ function createInsurancePlanRow(data = {}) {
     input.addEventListener("input", persistInsurancePlanRows);
     input.addEventListener("change", persistInsurancePlanRows);
   });
+  memoInput.addEventListener("input", () => {
+    updateInsuranceMemoConversionRow(memoInput, memoConverted);
+  });
+  memoInput.addEventListener("change", () => {
+    updateInsuranceMemoConversionRow(memoInput, memoConverted);
+  });
+  updateInsuranceMemoConversionRow(memoInput, memoConverted);
 }
 
 function serializeInsurancePlanRow(row) {
@@ -4059,6 +4462,7 @@ function loadInsurancePlanRows() {
     rows.forEach((row) => createInsurancePlanRow(row));
   }
   updateInsuranceDetailSummary();
+  updateInsuranceMemoConversions();
 }
 
 function updateInsuranceDetailSummary() {
@@ -4424,6 +4828,7 @@ function loadBondRows() {
         updateBondBalanceFromStorage();
         updateOtherAssetsTotalFromStorage();
         updateCurrentAssetsFromInvestmentBalances();
+        updateInsuranceMemoConversions();
         render();
       });
       bondUsdRateListenerBound = true;
@@ -4440,6 +4845,7 @@ function loadBondRows() {
   }
   updateBondAverageRate();
   updateBondBalanceFromStorage();
+  updateInsuranceMemoConversions();
 }
 
 function sortBondRowsByMaturity() {
@@ -4617,7 +5023,9 @@ function updateBondBalanceFromStorage() {
   const adjustment = readAdjustmentValue(adjustBondsInput);
   const combinedTotal = baseTotal + adjustment;
   const nextValue = String(Math.round(combinedTotal));
-  if (balanceBondsInput && balanceBondsInput.value !== nextValue) {
+  if (!MANUAL_INPUTS_ONLY &&
+    balanceBondsInput &&
+    balanceBondsInput.value !== nextValue) {
     balanceBondsInput.value = nextValue;
   }
   writePrevAdjustmentValue(adjustBondsInput, adjustment);
@@ -4771,6 +5179,7 @@ function buildSyncPayload() {
   };
 }
 
+
 async function handleExportSyncFolder() {
   if (!window.showDirectoryPicker) {
     window.alert("このブラウザはフォルダー選択に対応していません。");
@@ -4816,6 +5225,11 @@ function importSyncPayload(raw) {
   }
   const storage = isPlainObject(data.storage) ? data.storage : null;
   const inputs = isPlainObject(data.inputs) ? data.inputs : null;
+  const snapshotInputs =
+    storage && typeof storage[STORAGE_KEY] === "string"
+      ? safeParseJson(storage[STORAGE_KEY], null)
+      : null;
+  const effectiveInputs = inputs || snapshotInputs;
   const bonds = data.bonds ? normalizeBondStorage(data.bonds) : null;
   const otherAssets = Array.isArray(data.otherAssets) ? data.otherAssets : null;
   const insurancePlans = Array.isArray(data.insurancePlans)
@@ -4833,6 +5247,7 @@ function importSyncPayload(raw) {
   if (
     !storage &&
     !inputs &&
+    !snapshotInputs &&
     !bonds &&
     !otherAssets &&
     !insurancePlans &&
@@ -4847,8 +5262,24 @@ function importSyncPayload(raw) {
     if (storage) {
       restoreStorageSnapshot(storage);
     }
-    if (inputs) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(inputs));
+    if (effectiveInputs) {
+      const sanitizedInputs = {};
+      Object.entries(effectiveInputs).forEach(([key, value]) => {
+        if (SYNC_EXCLUDED_INPUT_KEYS.has(key)) {
+          return;
+        }
+        sanitizedInputs[key] = value;
+      });
+      const existingInputs = safeParseJson(
+        localStorage.getItem(STORAGE_KEY),
+        {}
+      );
+      const mergedInputs = { ...existingInputs, ...sanitizedInputs };
+      SYNC_EXCLUDED_INPUT_KEYS.forEach((key) => {
+        delete mergedInputs[key];
+      });
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedInputs));
+      applyInputSnapshot(mergedInputs);
     }
     if (bonds) {
       writeBondStorage(bonds);
@@ -4870,8 +5301,10 @@ function importSyncPayload(raw) {
     if (pensionChanges) {
       writePensionChanges(pensionChanges);
     }
-  } catch {
-    window.alert("同期データの保存に失敗しました。");
+  } catch (error) {
+    window.alert(
+      `同期データの保存に失敗しました。${error && error.message ? `\n${error.message}` : ""}`
+    );
     return false;
   }
   loadPersistedInputs();
@@ -4900,6 +5333,7 @@ function extractSectionTotals(text) {
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
   const totals = [];
+  let overall = null;
 
   lines.forEach((line) => {
     const match = line.match(/合計[:：]?\s*([+-]?\d[\d,]*)\s*円?/);
@@ -4911,15 +5345,21 @@ function extractSectionTotals(text) {
       return;
     }
     totals.push(amount);
+    if (/資産合計|総資産|総計|総合計|全体合計/.test(line)) {
+      overall = amount;
+    }
   });
 
-  return totals;
+  return { totals, overall };
 }
 
 function sumAssetsFromList(text) {
   const sectionTotals = extractSectionTotals(text);
-  if (sectionTotals.length > 0) {
-    return sectionTotals.reduce((sum, value) => sum + value, 0);
+  if (sectionTotals.overall !== null) {
+    return sectionTotals.overall;
+  }
+  if (sectionTotals.totals.length > 0) {
+    return sectionTotals.totals.reduce((sum, value) => sum + value, 0);
   }
 
   const table = parseAssetTable(text) || parseTable(text);
@@ -4927,13 +5367,15 @@ function sumAssetsFromList(text) {
     return null;
   }
 
-  const amountIndex = findAssetAmountIndex(table.headers);
+  const amountIndex =
+    findAssetYenAmountIndex(table.headers) ?? findAssetAmountIndex(table.headers);
   if (amountIndex === null) {
     return null;
   }
 
   let total = 0;
   let hasValue = false;
+  let aggregateCandidate = null;
 
   table.dataRows.forEach((row) => {
     if (row.length <= amountIndex) {
@@ -4943,11 +5385,19 @@ function sumAssetsFromList(text) {
     if (amount === null) {
       return;
     }
+    const rowText = row.map((cell) => String(cell ?? "")).join(" ").trim();
+    if (isAggregateRowText(rowText)) {
+      aggregateCandidate = amount;
+      return;
+    }
     total += amount;
     hasValue = true;
   });
 
-  return hasValue ? total : null;
+  if (hasValue) {
+    return total;
+  }
+  return aggregateCandidate !== null ? aggregateCandidate : null;
 }
 
 function parseDateValue(value) {
@@ -5077,10 +5527,20 @@ function applyImportedData() {
     importStatus.textContent = "ファイルを選択してください。";
     return;
   }
+  if (MANUAL_INPUTS_ONLY) {
+    importStatus.textContent =
+      "手入力モードのため数値は変更しません。";
+    importDirty = false;
+    render();
+    return;
+  }
   const assetTotal = sumAssetsFromList(assetText);
   const summaryTotal = latestTotalFromSummary(summaryText);
   const listInvestmentTotals = sumInvestmentsFromList(assetText);
   const summaryInvestmentTotals = sumInvestmentsFromSummary(summaryText);
+  const summaryBreakdown = summaryText.trim()
+    ? getSummaryBreakdown(summaryText)
+    : null;
   const importedAssets = extractImportedAssetRows(assetText);
   const usdDeposit = extractUsdDepositFromAssetList(assetText);
   let hasBondImport = importedAssets.bondRows.length > 0;
@@ -5154,20 +5614,46 @@ function applyImportedData() {
     importStatus.textContent = "取り込みに失敗しました（列名を確認してください）。";
   }
 
-  if (investmentTotals) {
-    balanceStocksInput.value = Math.round(investmentTotals.stocks);
-    balanceFundsInput.value = Math.round(investmentTotals.funds);
-    if (!hasBondImport) {
-      balanceBondsInput.value = Math.round(investmentTotals.bonds);
+  if (investmentTotals || summaryBreakdown) {
+    const mergedTotals = investmentTotals
+      ? { ...investmentTotals }
+      : {
+        stocks: 0,
+        funds: 0,
+        bonds: 0,
+        insurance: 0,
+        usd: 0,
+        dc: 0,
+      };
+    if (summaryBreakdown) {
+      const fillIfEmpty = (key, value) => {
+        if (!Number.isFinite(value)) {
+          return;
+        }
+        if (!Number.isFinite(mergedTotals[key]) || mergedTotals[key] === 0) {
+          mergedTotals[key] = value;
+        }
+      };
+      fillIfEmpty("stocks", summaryBreakdown.stocks);
+      fillIfEmpty("funds", summaryBreakdown.funds);
+      fillIfEmpty("bonds", summaryBreakdown.bonds);
+      fillIfEmpty("insurance", summaryBreakdown.insurance);
+      fillIfEmpty("dc", summaryBreakdown.pension);
     }
-    balanceInsuranceInput.value = Math.round(investmentTotals.insurance);
+    const totalsToApply = mergedTotals;
+    balanceStocksInput.value = Math.round(totalsToApply.stocks || 0);
+    balanceFundsInput.value = Math.round(totalsToApply.funds || 0);
+    if (!hasBondImport) {
+      balanceBondsInput.value = Math.round(totalsToApply.bonds || 0);
+    }
+    balanceInsuranceInput.value = Math.round(totalsToApply.insurance || 0);
     if (!hasOtherImport) {
-      balanceUsdInput.value = Math.round(investmentTotals.usd);
+      balanceUsdInput.value = Math.round(totalsToApply.usd || 0);
     }
     if (usdDeposit && Number.isFinite(usdDeposit.amountYen)) {
       balanceUsdInput.value = Math.round(usdDeposit.amountYen);
     }
-    balanceDcInput.value = Math.round(investmentTotals.dc);
+    balanceDcInput.value = Math.round(totalsToApply.dc || 0);
     initializeAdjustments({ applyToBalance: true, includeBonds: false });
     persistInputsToStorage();
   } else if (usdDeposit && Number.isFinite(usdDeposit.amountYen)) {
@@ -5283,6 +5769,7 @@ function handleOpenCsv() {
     "債券（円）",
     "保険（円）",
     "年金（円）",
+    "SBIネット銀行米ドル残高（円）",
   ];
   const displayRows = [];
   const pushRow = (row) => {
@@ -5293,9 +5780,10 @@ function handleOpenCsv() {
       toCsvNumber(row.cash),
       toCsvNumber(row.stocks),
       toCsvNumber(row.funds),
-      toCsvNumber(row.bonds),
+      toCsvNumber(getBondDisplayValue(row)),
       toCsvNumber(row.insurance),
       toCsvNumber(row.dc || 0),
+      toCsvNumber(getUsdDisplayValue(row)),
     ]);
   };
 
@@ -5363,6 +5851,7 @@ function getSimulationContext() {
   const bondMaturities = (storedBonds.active || []).map((row) => ({
     maturityDate: parseDate(row.maturityDate),
     currency: row.currency || "JPY",
+    cash: row.cash ?? false,
     faceValue: parseNumber(row.faceValue) || 0,
     bookValue:
       parseNumber(row.purchasePrice) ?? parseNumber(row.faceValue) ?? 0,
@@ -5389,9 +5878,7 @@ function getSimulationContext() {
   const baseDividendIncome = incomeMap.dividend || 0;
   const pensionIncomeTotal = sumInputs(pensionIncomeInputs);
   const ongoingIncome = (incomeMap.dividend || 0) + (incomeMap.other || 0);
-  const summaryBreakdown = importDirty
-    ? null
-    : getSummaryBreakdown(summaryDataInput.value);
+  const summaryBreakdown = getSummaryBreakdownSafe();
   const initial = buildInitialCategories(summaryBreakdown, currentAssets);
   const categories = {
     cash: initial.cash,
@@ -5561,6 +6048,17 @@ function updateStatementYearOptions(statementRows) {
   }
 }
 
+function getPreferredYear(years) {
+  if (!years.length) {
+    return null;
+  }
+  const currentYear = new Date().getFullYear();
+  if (years.includes(currentYear)) {
+    return currentYear;
+  }
+  return years[0];
+}
+
 function fillYearSelect(select, years) {
   if (!select) {
     return;
@@ -5581,7 +6079,7 @@ function fillYearSelect(select, years) {
     select.appendChild(option);
   });
   const selected = parseNumber(select.value);
-  const fallback = years[years.length - 1];
+  const fallback = getPreferredYear(years) ?? years[years.length - 1];
   select.value = String(years.includes(selected) ? selected : fallback);
   select.disabled = false;
 }
@@ -5595,7 +6093,7 @@ function updateAssetDetailYearOptions(statementRows) {
   });
   fillYearSelect(assetDetailYearSelect, years);
   if (years.length) {
-    const fallback = years[years.length - 1];
+    const fallback = getPreferredYear(years) ?? years[years.length - 1];
     if (!years.includes(assetDetailState.year)) {
       assetDetailState.year = fallback;
     }
@@ -5645,6 +6143,15 @@ function renderAssetDetail() {
     startDate,
     addYears(context.birthDate, 100)
   );
+  const cashBreakdown = buildCashBreakdown({
+    summaryBreakdown: getSummaryBreakdownSafe(),
+    currentAssetsValue: context.currentAssets,
+    investmentTotal: getInvestmentBalanceTotal(),
+  });
+  const cashFinal = Number.isFinite(cashBreakdown.cashFinal)
+    ? cashBreakdown.cashFinal
+    : context.categories.cash;
+  const categories = { ...context.categories, cash: cashFinal };
   const monthlyRows = simulateMonthlySeries({
     startDate,
     monthsRemaining,
@@ -5661,19 +6168,26 @@ function renderAssetDetail() {
     baseDividendIncome: context.baseDividendIncome,
     dividendYieldRate: context.dividendYieldRate,
     contributionSchedule: context.contributionSchedule,
-    categories: context.categories,
+    categories,
     bondMaturities: context.bondMaturities,
     usdRate: context.usdRate,
     pensionPlanState: context.pensionPlanState,
   });
 
   const categoryKey = ASSET_CATEGORY_KEYS[assetKey] || assetKey;
-  const baseValue = Number.isFinite(context.categories?.[categoryKey])
-    ? context.categories[categoryKey]
-    : 0;
+  const resolveDisplayValue = (row) => {
+    if (assetKey === "bonds") {
+      return getBondDisplayValue(row);
+    }
+    if (assetKey === "usd") {
+      return getUsdDisplayValue(row);
+    }
+    return Number.isFinite(row?.[categoryKey]) ? row[categoryKey] : 0;
+  };
+  const baseValue = resolveDisplayValue(context.categories || {});
   let previousValue = Number.isFinite(baseValue) ? baseValue : null;
   const rowsWithDelta = monthlyRows.map((row) => {
-    const value = Number.isFinite(row[categoryKey]) ? row[categoryKey] : 0;
+    const value = resolveDisplayValue(row);
     const delta = previousValue === null ? null : value - previousValue;
     previousValue = value;
     return { row, value, delta };
@@ -6149,6 +6663,7 @@ function render() {
   const retireIncomeTotal = retireBaseIncome;
   const today = new Date();
   updateBondBalanceFromStorage();
+  syncPointsInputFromImport();
   const insurancePlans = readInsurancePlans();
   syncInsuranceContributionFromDetail(insurancePlans, today);
   const pensionPlans = readPensionPlans();
@@ -6230,7 +6745,6 @@ function render() {
       if (
         currentAssetsInput &&
         Number.isFinite(derivedTotal) &&
-        (summaryBreakdown || cashInputManual) &&
         !currentAssetsInput.matches(":focus")
       ) {
         const roundedTotal = Math.round(derivedTotal);
@@ -6239,13 +6753,15 @@ function render() {
         hasAssets = roundedTotal >= 0;
         lastInvestmentBalanceTotal = investmentBalanceTotal;
       }
-      if (
-        balanceCashInput &&
-        !cashInputManual &&
-        Number.isFinite(cashNow) &&
-        !balanceCashInput.matches(":focus")
-      ) {
-        balanceCashInput.value = Math.round(cashNow);
+      if (!MANUAL_INPUTS_ONLY) {
+        if (
+          balanceCashInput &&
+          !cashInputManual &&
+          Number.isFinite(cashNow) &&
+          !balanceCashInput.matches(":focus")
+        ) {
+          balanceCashInput.value = Math.round(cashNow);
+        }
       }
       const cashAfterValue = cashNow - investmentContributionTotal;
       const warningCashNow = cashNow;
@@ -6493,6 +7009,7 @@ if (bondAdjustmentPair.balance && bondAdjustmentPair.adjust) {
   ...retireIncomeInputs,
   ...pensionIncomeInputs,
   balanceCashInput,
+  balancePointsInput,
   adjustCashInput,
   balanceStocksInput,
   balanceFundsInput,
@@ -6743,29 +7260,41 @@ if (assetDetailBackButton) {
   });
 }
 if (assetFileInput) {
+  setFileStatus(assetFileStatus, "待機中");
   assetFileInput.addEventListener("click", () => {
     assetFileInput.value = "";
   });
   assetFileInput.addEventListener("change", () => {
-    handleImportFileSelection({
-      fileInput: assetFileInput,
-      targetInput: assetDataInput,
-      statusTarget: assetFileStatus,
-      kind: "asset",
-    });
+    setFileStatus(assetFileStatus, "ファイル選択を検知しました。");
+    try {
+      handleImportFileSelection({
+        fileInput: assetFileInput,
+        targetInput: assetDataInput,
+        statusTarget: assetFileStatus,
+        kind: "asset",
+      });
+    } catch {
+      setFileStatus(assetFileStatus, "読み込み処理でエラーが発生しました。");
+    }
   });
 }
 if (summaryFileInput) {
+  setFileStatus(summaryFileStatus, "待機中");
   summaryFileInput.addEventListener("click", () => {
     summaryFileInput.value = "";
   });
   summaryFileInput.addEventListener("change", () => {
-    handleImportFileSelection({
-      fileInput: summaryFileInput,
-      targetInput: summaryDataInput,
-      statusTarget: summaryFileStatus,
-      kind: "summary",
-    });
+    setFileStatus(summaryFileStatus, "ファイル選択を検知しました。");
+    try {
+      handleImportFileSelection({
+        fileInput: summaryFileInput,
+        targetInput: summaryDataInput,
+        statusTarget: summaryFileStatus,
+        kind: "summary",
+      });
+    } catch {
+      setFileStatus(summaryFileStatus, "読み込み処理でエラーが発生しました。");
+    }
   });
 }
 assetDataInput.addEventListener("input", markImportDirty);

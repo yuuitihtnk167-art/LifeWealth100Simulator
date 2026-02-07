@@ -32,7 +32,7 @@
         </label>
         <label>
           現在の資産総額（円）
-          <input id="currentAssets" type="number" min="0" step="10000" value="15000000" required>
+          <input id="currentAssets" type="number" min="0" step="10000" value="15000000" required readonly data-no-persist>
         </label>
         <div class="export-actions export-actions-inline">
           <button id="exportCsv" type="button">年次CSVをダウンロード</button>
@@ -387,8 +387,12 @@
           <div class="investment-item">
             <h3>現金</h3>
             <label>
-              残高（円）
+              残高（円 / ポイント除く）
               <input id="balanceCash" type="number" step="1000" inputmode="numeric">
+            </label>
+            <label>
+              ポイント（円）
+              <input id="balancePoints" type="number" step="1000" inputmode="numeric">
             </label>
             <label>
               手動調整（円）
@@ -515,7 +519,7 @@
             </div>
           </div>
           <div class="investment-item">
-            <h3>ドル積立</h3>
+            <h3>SBIネット銀行米ドル残高</h3>
             <label>
               残高（円換算）
               <input id="balanceUsd" type="number" min="0" step="1000" inputmode="numeric">
@@ -572,7 +576,7 @@
           債券の入力
           <span class="bond-average" id="bondAverageRate">平均利率: -</span>
         </h2>
-        <p class="helper-text">償還日に債券残高が現金へ振替されます（円未満切り捨て）。</p>
+        <p class="helper-text">償還日に債券残高が現金またはSBI米ドル残高へ振替されます（円未満切り捨て）。</p>
         <div class="bond-table">
           <table>
             <thead>
@@ -690,6 +694,7 @@
                 <th>保険料（円／月）</th>
                 <th>終了年月</th>
                 <th>メモ</th>
+                <th>メモ換算（円）</th>
                 <th>操作</th>
               </tr>
             </thead>
