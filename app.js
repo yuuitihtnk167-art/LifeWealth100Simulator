@@ -7003,6 +7003,7 @@ if (bondAdjustmentPair.balance && bondAdjustmentPair.adjust) {
   currentAssetsInput,
   retirementAgeInput,
   retirementIncomeEndAgeInput,
+  dividendYieldInput,
   ...expenseInputs,
   ...incomeInputs,
   ...retireExpenseInputs,
