@@ -600,10 +600,10 @@ function buildCashBreakdown({ summaryBreakdown, currentAssetsValue, investmentTo
   const importedCash = getImportedCashValue();
   const manualPoints = getPointsInputValue();
   const importedPoints = getImportedPointsValue();
-  const points = Number.isFinite(manualPoints)
-    ? manualPoints
-    : Number.isFinite(importedPoints)
-      ? importedPoints
+  const points = Number.isFinite(importedPoints)
+    ? importedPoints
+    : Number.isFinite(manualPoints)
+      ? manualPoints
       : summaryBreakdown?.points || 0;
   const baseWithoutPoints = resolveCashBaseWithoutPoints({
     cashInputValue,
@@ -627,6 +627,53 @@ function buildCashBreakdown({ summaryBreakdown, currentAssetsValue, investmentTo
     cashAdjustment,
     baseWithPoints,
     cashFinal,
+  };
+}
+
+function buildCurrentSpreadsheetRow({
+  atDate,
+  investmentBalanceTotal,
+  investmentContributionTotal,
+  cashBreakdown,
+}) {
+  const safeInvestmentBalance = Number.isFinite(investmentBalanceTotal)
+    ? investmentBalanceTotal
+    : 0;
+  const safeContribution = Number.isFinite(investmentContributionTotal)
+    ? investmentContributionTotal
+    : 0;
+  const cashBaseWithoutPoints = Number.isFinite(cashBreakdown?.baseWithoutPoints)
+    ? cashBreakdown.baseWithoutPoints
+    : null;
+  const points = Number.isFinite(cashBreakdown?.points)
+    ? cashBreakdown.points
+    : 0;
+  const cashReclassTotal = Number.isFinite(cashBreakdown?.cashReclassTotal)
+    ? cashBreakdown.cashReclassTotal
+    : 0;
+  const cashAdjustment = Number.isFinite(cashBreakdown?.cashAdjustment)
+    ? cashBreakdown.cashAdjustment
+    : 0;
+  const cashFinal = Number.isFinite(cashBreakdown?.cashFinal)
+    ? cashBreakdown.cashFinal
+    : null;
+  const totalAssets = Number.isFinite(cashFinal)
+    ? cashFinal + safeInvestmentBalance
+    : null;
+  return {
+    date: atDate || new Date(),
+    cashBaseWithoutPoints,
+    points,
+    cashReclassTotal,
+    cashAdjustment,
+    cashFinal,
+    investmentBalanceTotal: safeInvestmentBalance,
+    investmentContributionTotal: safeContribution,
+    investmentAfterContribution: safeInvestmentBalance + safeContribution,
+    cashAfterContribution: Number.isFinite(cashFinal)
+      ? cashFinal - safeContribution
+      : null,
+    totalAssets,
   };
 }
 
@@ -907,6 +954,188 @@ function simulateToAge100({
   return { months, assets };
 }
 
+function createCategoryAmountMap() {
+  return {
+    stocks: 0,
+    funds: 0,
+    bonds: 0,
+    insurance: 0,
+    dc: 0,
+    usd: 0,
+    other: 0,
+  };
+}
+
+function normalizeSimulationCategories(categories) {
+  const read = (key) => {
+    const value = categories?.[key];
+    return Number.isFinite(value) ? value : 0;
+  };
+  return {
+    cash: read("cash"),
+    stocks: read("stocks"),
+    funds: read("funds"),
+    bonds: read("bonds"),
+    insurance: read("insurance"),
+    dc: read("dc"),
+    usd: read("usd"),
+    other: read("other"),
+  };
+}
+
+function simulateUnifiedMonthlyLedger({
+  startDate,
+  monthsRemaining,
+  annualRate,
+  categoryRates,
+  retirementAge,
+  retirementIncomeEndAge,
+  workIncome,
+  workExpense,
+  retireIncome,
+  retireExpense,
+  pensionIncome,
+  pensionExpense,
+  baseDividendIncome,
+  dividendYieldRate,
+  contributionSchedule,
+  categories,
+  bondMaturities,
+  usdRate,
+  pensionPlanState,
+}) {
+  const monthlyRate = Math.pow(1 + annualRate, 1 / 12) - 1;
+  const rows = [];
+  const totalMonths = Math.max(0, monthsRemaining);
+  let data = normalizeSimulationCategories(categories);
+  const startMonthIndex = monthIndex(startDate);
+  const maturitySchedule = buildBondMaturitySchedule(bondMaturities, usdRate);
+  const planState = clonePensionPlanState(pensionPlanState);
+  const investKeys = [
+    "stocks",
+    "funds",
+    "bonds",
+    "insurance",
+    "dc",
+    "other",
+  ];
+
+  for (let i = 0; i < totalMonths; i += 1) {
+    const monthIndexValue = startMonthIndex + i;
+    const monthDate = addMonths(startDate, i);
+    const periodEndDate = addMonths(startDate, i + 1);
+    const startSnapshot = {
+      ...data,
+      total: sumCategoryTotal(data),
+    };
+    const dividendDelta = getDividendDelta(
+      baseDividendIncome,
+      startMonthIndex,
+      monthIndexValue,
+      dividendYieldRate
+    );
+    let phase = "work";
+    let monthlyIncome = workIncome + dividendDelta;
+    let monthlyExpense = workExpense;
+    if (monthIndexValue >= retirementAge) {
+      phase = "retire";
+      monthlyIncome = retireIncome + dividendDelta;
+      monthlyExpense = retireExpense;
+    }
+    if (monthIndexValue >= retirementIncomeEndAge) {
+      phase = "pension";
+      monthlyIncome = pensionIncome + dividendDelta;
+      monthlyExpense = pensionExpense;
+    }
+
+    const gainsByCategory = createCategoryAmountMap();
+    let monthlyInvestmentGain = 0;
+    investKeys.forEach((key) => {
+      const rate = categoryRates?.[key] ?? monthlyRate;
+      const gain = isCompoundingCategory(key) ? data[key] * rate : 0;
+      if (isCompoundingCategory(key)) {
+        data[key] += gain;
+      }
+      gainsByCategory[key] = gain;
+      monthlyInvestmentGain += gain;
+    });
+
+    data.cash += monthlyIncome - monthlyExpense;
+
+    const contributionsByCategory = createCategoryAmountMap();
+    let contributions = 0;
+    (contributionSchedule || []).forEach((item) => {
+      if (monthIndexValue >= item.endMonthIndex) {
+        return;
+      }
+      const amount = Number.isFinite(item.amount) ? item.amount : 0;
+      if (!amount) {
+        return;
+      }
+      contributions += amount;
+      if (Object.prototype.hasOwnProperty.call(contributionsByCategory, item.category)) {
+        contributionsByCategory[item.category] += amount;
+      }
+      if (item.category !== "cash") {
+        data.cash -= amount;
+      }
+      if (!Object.prototype.hasOwnProperty.call(data, item.category)) {
+        data[item.category] = 0;
+      }
+      data[item.category] += amount;
+    });
+
+    const bondMaturityFlow = applyBondMaturities(
+      data,
+      maturitySchedule,
+      monthIndexValue
+    );
+    const pensionFlow = applyPensionPlanFlow(data, monthIndexValue, planState);
+    if (pensionFlow.contribution) {
+      contributions += pensionFlow.contribution;
+      contributionsByCategory.dc += pensionFlow.contribution;
+    }
+
+    const endSnapshot = {
+      ...data,
+      total: sumCategoryTotal(data),
+    };
+    rows.push({
+      index: i,
+      monthIndex: monthIndexValue,
+      date: monthDate,
+      endDate: periodEndDate,
+      phase,
+      income: monthlyIncome,
+      expense: monthlyExpense,
+      netCash: monthlyIncome - monthlyExpense,
+      dividendDelta,
+      investmentGain: monthlyInvestmentGain,
+      contributions,
+      contributionsByCategory: { ...contributionsByCategory },
+      gainsByCategory: { ...gainsByCategory },
+      bondMaturity: bondMaturityFlow.faceValue || 0,
+      bondMaturityBook: bondMaturityFlow.bookValue || 0,
+      pensionContribution: pensionFlow.contribution || 0,
+      pensionTransfer: pensionFlow.transfer || 0,
+      totalChange: endSnapshot.total - startSnapshot.total,
+      start: { ...startSnapshot },
+      end: { ...endSnapshot },
+      cash: endSnapshot.cash,
+      stocks: endSnapshot.stocks,
+      funds: endSnapshot.funds,
+      bonds: endSnapshot.bonds,
+      insurance: endSnapshot.insurance,
+      dc: endSnapshot.dc,
+      usd: endSnapshot.usd,
+      other: endSnapshot.other,
+      total: endSnapshot.total,
+    });
+  }
+
+  return rows;
+}
+
 function simulateToAge100Detailed({
   startDate,
   monthsRemaining,
@@ -925,59 +1154,31 @@ function simulateToAge100Detailed({
   pensionPlanState,
 }) {
   const months = Math.max(0, monthsRemaining);
-  let data = { ...categories };
-  const startMonthIndex = monthIndex(startDate);
-  const maturitySchedule = buildBondMaturitySchedule(bondMaturities, usdRate);
-  const planState = clonePensionPlanState(pensionPlanState);
-  const investKeys = [
-    "stocks",
-    "funds",
-    "bonds",
-    "insurance",
-    "dc",
-    "other",
-  ];
-
-  for (let i = 0; i < months; i += 1) {
-    const monthIndexValue = startMonthIndex + i;
-    const dividendDelta = getDividendDelta(
-      baseDividendIncome,
-      startMonthIndex,
-      monthIndexValue,
-      dividendYieldRate
-    );
-    let cashFlow = monthlyNetCash;
-    if (monthIndexValue >= retirementAge) {
-      cashFlow = retirementMonthlyNetCash;
-    }
-    if (monthIndexValue >= retirementIncomeEndAge) {
-      cashFlow = postRetirementMonthlyNetCash;
-    }
-
-    investKeys.forEach((key) => {
-      const rate = categoryRates[key] ?? 0;
-      if (isCompoundingCategory(key)) {
-        data[key] += data[key] * rate;
-      }
-    });
-
-    data.cash += cashFlow + dividendDelta;
-
-    contributionSchedule.forEach((item) => {
-      if (monthIndexValue < item.endMonthIndex) {
-        const amount = item.amount;
-        if (item.category !== "cash") {
-          data.cash -= amount;
-        }
-        data[item.category] += amount;
-      }
-    });
-
-    applyBondMaturities(data, maturitySchedule, monthIndexValue);
-    applyPensionPlanFlow(data, monthIndexValue, planState);
-  }
-
-  return { months, assets: sumCategoryTotal(data) };
+  const rows = simulateUnifiedMonthlyLedger({
+    startDate,
+    monthsRemaining: months,
+    annualRate: 0,
+    categoryRates,
+    retirementAge,
+    retirementIncomeEndAge,
+    workIncome: monthlyNetCash,
+    workExpense: 0,
+    retireIncome: retirementMonthlyNetCash,
+    retireExpense: 0,
+    pensionIncome: postRetirementMonthlyNetCash,
+    pensionExpense: 0,
+    baseDividendIncome,
+    dividendYieldRate,
+    contributionSchedule,
+    categories,
+    bondMaturities,
+    usdRate,
+    pensionPlanState,
+  });
+  const assets = rows.length
+    ? rows[rows.length - 1].total
+    : sumCategoryTotal(normalizeSimulationCategories(categories));
+  return { months, assets };
 }
 
 function getContributionForMonth(monthIndexValue, schedule) {
@@ -1280,69 +1481,35 @@ function findNegativeCashMonthDetailed({
   usdRate,
   pensionPlanState,
 }) {
-  const monthlyRate = Math.pow(1 + annualRate, 1 / 12) - 1;
-  const totalMonths = Math.max(0, monthsRemaining);
-  let data = { ...categories };
-  const startMonthIndex = monthIndex(startDate);
-  const maturitySchedule = buildBondMaturitySchedule(bondMaturities, usdRate);
-  const planState = clonePensionPlanState(pensionPlanState);
-  const investKeys = [
-    "stocks",
-    "funds",
-    "bonds",
-    "insurance",
-    "dc",
-    "other",
-  ];
-
-  for (let i = 0; i < totalMonths; i += 1) {
-    const monthIndexValue = startMonthIndex + i;
-    const monthDate = addMonths(startDate, i);
-    const dividendDelta = getDividendDelta(
-      baseDividendIncome,
-      startMonthIndex,
-      monthIndexValue,
-      dividendYieldRate
-    );
-    let cashFlow = monthlyNetCash + dividendDelta;
-    if (monthIndexValue >= retirementAge) {
-      cashFlow = retirementMonthlyNetCash + dividendDelta;
-    }
-    if (monthIndexValue >= retirementIncomeEndAge) {
-      cashFlow = postRetirementMonthlyNetCash + dividendDelta;
-    }
-
-    investKeys.forEach((key) => {
-      const rate = categoryRates?.[key] ?? monthlyRate;
-      if (isCompoundingCategory(key)) {
-        data[key] += data[key] * rate;
-      }
-    });
-
-    data.cash += cashFlow;
-
-    contributionSchedule.forEach((item) => {
-      if (monthIndexValue < item.endMonthIndex) {
-        const amount = item.amount;
-        if (item.category !== "cash") {
-          data.cash -= amount;
-        }
-        data[item.category] += amount;
-      }
-    });
-
-    applyBondMaturities(data, maturitySchedule, monthIndexValue);
-    applyPensionPlanFlow(data, monthIndexValue, planState);
-
-    if (data.cash < 0) {
-      return {
-        monthIndex: monthIndexValue,
-        date: addMonths(startDate, i + 1),
-        cash: data.cash,
-      };
-    }
+  const rows = simulateUnifiedMonthlyLedger({
+    startDate,
+    monthsRemaining,
+    annualRate,
+    categoryRates,
+    retirementAge,
+    retirementIncomeEndAge,
+    workIncome: monthlyNetCash,
+    workExpense: 0,
+    retireIncome: retirementMonthlyNetCash,
+    retireExpense: 0,
+    pensionIncome: postRetirementMonthlyNetCash,
+    pensionExpense: 0,
+    baseDividendIncome,
+    dividendYieldRate,
+    contributionSchedule,
+    categories,
+    bondMaturities,
+    usdRate,
+    pensionPlanState,
+  });
+  const negative = rows.find((row) => row.cash < 0);
+  if (negative) {
+    return {
+      monthIndex: negative.monthIndex,
+      date: negative.endDate,
+      cash: negative.cash,
+    };
   }
-
   return null;
 }
 
@@ -1364,74 +1531,47 @@ function simulateAnnualSeries({
   usdRate,
   pensionPlanState,
 }) {
-  const monthlyRate = Math.pow(1 + annualRate, 1 / 12) - 1;
+  const ledgerRows = simulateUnifiedMonthlyLedger({
+    startDate,
+    monthsRemaining,
+    annualRate,
+    categoryRates,
+    retirementAge,
+    retirementIncomeEndAge,
+    workIncome: monthlyNetCash,
+    workExpense: 0,
+    retireIncome: retirementMonthlyNetCash,
+    retireExpense: 0,
+    pensionIncome: postRetirementMonthlyNetCash,
+    pensionExpense: 0,
+    baseDividendIncome,
+    dividendYieldRate,
+    contributionSchedule,
+    categories,
+    bondMaturities,
+    usdRate,
+    pensionPlanState,
+  });
   const rows = [];
-  const totalMonths = Math.max(0, monthsRemaining);
-  let data = { ...categories };
-  const startMonthIndex = monthIndex(startDate);
-  const maturitySchedule = buildBondMaturitySchedule(bondMaturities, usdRate);
-  const planState = clonePensionPlanState(pensionPlanState);
-  const investKeys = [
-    "stocks",
-    "funds",
-    "bonds",
-    "insurance",
-    "dc",
-    "other",
-  ];
-
-  for (let i = 0; i < totalMonths; i += 1) {
-    const monthIndexValue = startMonthIndex + i;
-    const monthDate = addMonths(startDate, i);
-    const dividendDelta = getDividendDelta(
-      baseDividendIncome,
-      startMonthIndex,
-      monthIndexValue,
-      dividendYieldRate
-    );
-    let cashFlow = monthlyNetCash + dividendDelta;
-    if (monthIndexValue >= retirementAge) {
-      cashFlow = retirementMonthlyNetCash + dividendDelta;
+  ledgerRows.forEach((row, index) => {
+    const isYearEnd = row.date.getMonth() === 11;
+    const isFinal = index === ledgerRows.length - 1;
+    if (!isYearEnd && !isFinal) {
+      return;
     }
-    if (monthIndexValue >= retirementIncomeEndAge) {
-      cashFlow = postRetirementMonthlyNetCash + dividendDelta;
-    }
-
-    investKeys.forEach((key) => {
-      const rate = categoryRates?.[key] ?? monthlyRate;
-      if (isCompoundingCategory(key)) {
-        data[key] += data[key] * rate;
-      }
+    rows.push({
+      date: row.endDate,
+      total: row.total,
+      cash: row.cash,
+      stocks: row.stocks,
+      funds: row.funds,
+      bonds: row.bonds,
+      insurance: row.insurance,
+      dc: row.dc,
+      usd: row.usd,
+      other: row.other,
     });
-
-    data.cash += cashFlow;
-
-    contributionSchedule.forEach((item) => {
-      if (monthIndexValue < item.endMonthIndex) {
-        const amount = item.amount;
-        if (item.category !== "cash") {
-          data.cash -= amount;
-        }
-        data[item.category] += amount;
-      }
-    });
-
-    applyBondMaturities(data, maturitySchedule, monthIndexValue);
-    applyPensionPlanFlow(data, monthIndexValue, planState);
-
-    const isYearEnd = monthDate.getMonth() === 11;
-    const isFinal = i === totalMonths - 1;
-    if (isYearEnd || isFinal) {
-      const date = addMonths(startDate, i + 1);
-      const total = sumCategoryTotal(data);
-      rows.push({
-        date,
-        total,
-        ...data,
-      });
-    }
-  }
-
+  });
   return rows;
 }
 
@@ -1456,71 +1596,39 @@ function simulateMonthlySeries({
   usdRate,
   pensionPlanState,
 }) {
-  const monthlyRate = Math.pow(1 + annualRate, 1 / 12) - 1;
-  const rows = [];
-  const totalMonths = Math.max(0, monthsRemaining);
-  let data = { ...categories };
-  const startMonthIndex = monthIndex(startDate);
-  const maturitySchedule = buildBondMaturitySchedule(bondMaturities, usdRate);
-  const planState = clonePensionPlanState(pensionPlanState);
-  const investKeys = [
-    "stocks",
-    "funds",
-    "bonds",
-    "insurance",
-    "dc",
-    "other",
-  ];
-
-  for (let i = 0; i < totalMonths; i += 1) {
-    const monthIndexValue = startMonthIndex + i;
-    const monthDate = addMonths(startDate, i);
-    const dividendDelta = getDividendDelta(
-      baseDividendIncome,
-      startMonthIndex,
-      monthIndexValue,
-      dividendYieldRate
-    );
-    let monthlyIncome = workIncome + dividendDelta;
-    let monthlyExpense = workExpense;
-    if (monthIndexValue >= retirementAge) {
-      monthlyIncome = retireIncome + dividendDelta;
-      monthlyExpense = retireExpense;
-    }
-    if (monthIndexValue >= retirementIncomeEndAge) {
-      monthlyIncome = pensionIncome + dividendDelta;
-      monthlyExpense = pensionExpense;
-    }
-
-    investKeys.forEach((key) => {
-      const rate = categoryRates?.[key] ?? monthlyRate;
-      if (isCompoundingCategory(key)) {
-        data[key] += data[key] * rate;
-      }
-    });
-
-    data.cash += monthlyIncome - monthlyExpense;
-
-    contributionSchedule.forEach((item) => {
-      if (monthIndexValue < item.endMonthIndex) {
-        const amount = item.amount;
-        if (item.category !== "cash") {
-          data.cash -= amount;
-        }
-        data[item.category] += amount;
-      }
-    });
-
-    applyBondMaturities(data, maturitySchedule, monthIndexValue);
-    applyPensionPlanFlow(data, monthIndexValue, planState);
-
-    rows.push({
-      date: monthDate,
-      ...data,
-    });
-  }
-
-  return rows;
+  const ledgerRows = simulateUnifiedMonthlyLedger({
+    startDate,
+    monthsRemaining,
+    annualRate,
+    categoryRates,
+    retirementAge,
+    retirementIncomeEndAge,
+    workIncome,
+    workExpense,
+    retireIncome,
+    retireExpense,
+    pensionIncome,
+    pensionExpense,
+    baseDividendIncome,
+    dividendYieldRate,
+    contributionSchedule,
+    categories,
+    bondMaturities,
+    usdRate,
+    pensionPlanState,
+  });
+  return ledgerRows.map((row) => ({
+    date: row.date,
+    cash: row.cash,
+    stocks: row.stocks,
+    funds: row.funds,
+    bonds: row.bonds,
+    insurance: row.insurance,
+    dc: row.dc,
+    usd: row.usd,
+    other: row.other,
+    total: row.total,
+  }));
 }
 
 function sumCategoryTotal(data) {
@@ -1565,231 +1673,144 @@ function simulateAnnualStatements({
   usdRate,
   pensionPlanState,
 }) {
-  const monthlyRate = Math.pow(1 + annualRate, 1 / 12) - 1;
+  const monthlyRows = simulateUnifiedMonthlyLedger({
+    startDate,
+    monthsRemaining,
+    annualRate,
+    categoryRates,
+    retirementAge,
+    retirementIncomeEndAge,
+    workIncome,
+    workExpense,
+    retireIncome,
+    retireExpense,
+    pensionIncome,
+    pensionExpense,
+    baseDividendIncome,
+    dividendYieldRate,
+    contributionSchedule,
+    categories,
+    bondMaturities,
+    usdRate,
+    pensionPlanState,
+  });
+  if (!monthlyRows.length) {
+    return [];
+  }
   const rows = [];
-  const totalMonths = Math.max(0, monthsRemaining);
-  let data = { ...categories };
   const startMonthIndex = monthIndex(startDate);
-  const maturitySchedule = buildBondMaturitySchedule(bondMaturities, usdRate);
-  const planState = clonePensionPlanState(pensionPlanState);
-  const investKeys = [
-    "stocks",
-    "funds",
-    "bonds",
-    "insurance",
-    "dc",
-    "other",
-  ];
-
-  // 会計処理：年次決算データ初期化
-  // 年度開始時点の残高、年間の収支、運用益を月次で累積して年度決算を作成
-  let yearStart = { ...data };  // 期首残高
-  let yearIncome = 0;            // 総現金収入
-  let yearCashIncome = 0;        // 給与・pension等の現金収入
-  let yearInvestmentIncome = 0;  // 配当等の投資収入（未使用）
-  let yearExpense = 0;           // 総現金支出
-  let yearInvestmentGain = 0;    // 運用益（含み益）
-  let yearContribution = 0;      // 投資支出（資産移動）
-  let yearBondMaturityFace = 0;  // 債券償還による現金化（額面）
-  let yearBondMaturityBook = 0;  // 債券償還による残高減少（評価額）
-  let yearPensionTransfer = 0;   // 年金給付による現金化
-  let yearContributionByCategory = {
-    stocks: 0,
-    funds: 0,
-    bonds: 0,
-    insurance: 0,
-    dc: 0,
-    usd: 0,
-    other: 0,
+  const initial = normalizeSimulationCategories(categories);
+  let yearStart = {
+    ...initial,
+    total: sumCategoryTotal(initial),
   };
-  let yearGainByCategory = {
-    stocks: 0,
-    funds: 0,
-    bonds: 0,
-    insurance: 0,
-    dc: 0,
-    usd: 0,
-    other: 0,
-  };
+  let yearIncome = 0;
+  let yearCashIncome = 0;
+  let yearInvestmentIncome = 0;
+  let yearExpense = 0;
+  let yearInvestmentGain = 0;
+  let yearContribution = 0;
+  let yearBondMaturityFace = 0;
+  let yearBondMaturityBook = 0;
+  let yearPensionTransfer = 0;
+  let yearContributionByCategory = createCategoryAmountMap();
+  let yearGainByCategory = createCategoryAmountMap();
   let yearWorkMonths = 0;
   let yearRetireMonths = 0;
   let yearPensionMonths = 0;
   let yearMonths = 0;
 
-  for (let i = 0; i < totalMonths; i += 1) {
-    const monthIndexValue = startMonthIndex + i;
-    const monthDate = addMonths(startDate, i);
-
-    const dividendDelta = getDividendDelta(
-      baseDividendIncome,
-      startMonthIndex,
-      monthIndexValue,
-      dividendYieldRate
-    );
-    let monthlyIncome = workIncome + dividendDelta;
-    let monthlyExpense = workExpense;
-    let phase = "work";
-    if (monthIndexValue >= retirementAge) {
-      monthlyIncome = retireIncome + dividendDelta;
-      monthlyExpense = retireExpense;
-      phase = "retire";
-    }
-    if (monthIndexValue >= retirementIncomeEndAge) {
-      monthlyIncome = pensionIncome + dividendDelta;
-      monthlyExpense = pensionExpense;
-      phase = "pension";
-    }
-
-    // 会計処理：運用益（含み益）の計算
-    // 複利計算対象カテゴリーのみ期中の利息/配当を認識
-    // 注：実現益と含み益を区分していない（含み益ベースで計算）
-    let monthlyInvestmentGain = 0;
-    investKeys.forEach((key) => {
-      const rate = categoryRates?.[key] ?? monthlyRate;
-      const gain = isCompoundingCategory(key) ? data[key] * rate : 0;
-      if (isCompoundingCategory(key)) {
-        data[key] += gain;  // 運用益を資産に加算（含み益の認識）
-      }
-      yearGainByCategory[key] += gain;
-      monthlyInvestmentGain += gain;
+  monthlyRows.forEach((entry, index) => {
+    yearIncome += entry.income;
+    yearCashIncome += entry.income;
+    yearExpense += entry.expense;
+    yearInvestmentGain += entry.investmentGain;
+    yearContribution += entry.contributions;
+    yearBondMaturityFace += entry.bondMaturity;
+    yearBondMaturityBook += entry.bondMaturityBook;
+    yearPensionTransfer += entry.pensionTransfer;
+    Object.keys(yearContributionByCategory).forEach((key) => {
+      yearContributionByCategory[key] += entry.contributionsByCategory[key] || 0;
     });
-
-    data.cash += monthlyIncome - monthlyExpense;
-    yearIncome += monthlyIncome;
-    yearCashIncome += monthlyIncome;
-    yearExpense += monthlyExpense;
-    if (phase === "work") {
+    Object.keys(yearGainByCategory).forEach((key) => {
+      yearGainByCategory[key] += entry.gainsByCategory[key] || 0;
+    });
+    if (entry.phase === "work") {
       yearWorkMonths += 1;
-    } else if (phase === "retire") {
+    } else if (entry.phase === "retire") {
       yearRetireMonths += 1;
     } else {
       yearPensionMonths += 1;
     }
-
-    // 会計処理：投資支出（資産配分）
-    // 拠出は資産の増加（投資信託や保険への振替）であり、損益計算書上の支出ではない
-    contributionSchedule.forEach((item) => {
-      if (monthIndexValue < item.endMonthIndex) {
-        const amount = item.amount;
-        yearContribution += amount;
-        if (yearContributionByCategory[item.category] !== undefined) {
-          yearContributionByCategory[item.category] += amount;
-        }
-        if (item.category !== "cash") {
-          data.cash -= amount;  // 現金減少
-        }
-        data[item.category] += amount;  // 対応する資産カテゴリー増加
-      }
-    });
-
-    const bondMaturityFlow = applyBondMaturities(
-      data,
-      maturitySchedule,
-      monthIndexValue
-    );
-    yearBondMaturityFace += bondMaturityFlow.faceValue || 0;
-    yearBondMaturityBook += bondMaturityFlow.bookValue || 0;
-    // 債券の差額は利息（現金）として扱うため運用益には含めない
-    const pensionFlow = applyPensionPlanFlow(
-      data,
-      monthIndexValue,
-      planState
-    );
-    if (pensionFlow.contribution) {
-      yearContribution += pensionFlow.contribution;
-      yearContributionByCategory.dc += pensionFlow.contribution;
-    }
-    yearPensionTransfer += pensionFlow.transfer;
-    yearInvestmentGain += monthlyInvestmentGain;
     yearMonths += 1;
 
-    const isYearEnd = monthDate.getMonth() === 11;
-    const isFinal = i === totalMonths - 1;
-    if (isYearEnd || isFinal) {
-      const endDate = addMonths(startDate, i + 1);
-      const startTotal = sumCategoryTotal(yearStart);
-      const endTotal = sumCategoryTotal(data);
-      // 会計処理：年度決算の資産増減分析
-      // netCash = 現金ベースの収支（収入 - 支出）
-      // investmentGain = 運用益（含み益）
-      // bondMaturityGain = 債券償還の差額（額面 - 評価額）
-      // totalChange = 資産増減の総額（netCash + investmentGain + bondMaturityGain）
-      // 期末残高 = 期首残高 + 資産増減総額
-      const netCash = yearIncome - yearExpense;
-      const bondMaturityGain = yearBondMaturityFace - yearBondMaturityBook;
-      const totalChange = netCash + yearInvestmentGain + bondMaturityGain;
-      const mismatch =
-        Math.round(startTotal + totalChange) !== Math.round(endTotal);
-      const yearDividendDelta = getDividendDelta(
-        baseDividendIncome,
-        startMonthIndex,
-        monthIndexValue,
-        dividendYieldRate
-      );
-      rows.push({
-        year: monthDate.getFullYear(),
-        date: endDate,
-        start: { ...yearStart, total: startTotal },
-        end: { ...data, total: endTotal },
-        income: yearIncome,
-        cashIncome: yearCashIncome,
-        investmentIncome: yearInvestmentIncome,
-        expense: yearExpense,
-        netCash,
-        investmentGain: yearInvestmentGain,
-        totalChange,
-        bondMaturity: yearBondMaturityFace,
-        bondMaturityBook: yearBondMaturityBook,
-        pensionTransfer: yearPensionTransfer,
-        months: yearMonths,
-        contributions: yearContribution,
-        contributionsByCategory: { ...yearContributionByCategory },
-        gainsByCategory: { ...yearGainByCategory },
-        workMonths: yearWorkMonths,
-        retireMonths: yearRetireMonths,
-        pensionMonths: yearPensionMonths,
-        workIncome: workIncome + yearDividendDelta,
-        retireIncome: retireIncome + yearDividendDelta,
-        pensionIncome: pensionIncome + yearDividendDelta,
-        workExpense,
-        retireExpense,
-        pensionExpense,
-        mismatch,
-      });
-      yearStart = { ...data };
-      yearIncome = 0;
-      yearCashIncome = 0;
-      yearInvestmentIncome = 0;
-      yearExpense = 0;
-      yearInvestmentGain = 0;
-      yearBondMaturityFace = 0;
-      yearBondMaturityBook = 0;
-      yearPensionTransfer = 0;
-      yearContribution = 0;
-      yearContributionByCategory = {
-        stocks: 0,
-        funds: 0,
-        bonds: 0,
-        insurance: 0,
-        dc: 0,
-        usd: 0,
-        other: 0,
-      };
-      yearGainByCategory = {
-        stocks: 0,
-        funds: 0,
-        bonds: 0,
-        insurance: 0,
-        dc: 0,
-        usd: 0,
-        other: 0,
-      };
-      yearWorkMonths = 0;
-      yearRetireMonths = 0;
-      yearPensionMonths = 0;
-      yearMonths = 0;
+    const isYearEnd = entry.date.getMonth() === 11;
+    const isFinal = index === monthlyRows.length - 1;
+    if (!isYearEnd && !isFinal) {
+      return;
     }
-  }
+
+    const startTotal = yearStart.total;
+    const endSnapshot = { ...entry.end };
+    const endTotal = endSnapshot.total;
+    const netCash = yearIncome - yearExpense;
+    const bondMaturityGain = yearBondMaturityFace - yearBondMaturityBook;
+    const totalChange = netCash + yearInvestmentGain + bondMaturityGain;
+    const mismatch = Math.round(startTotal + totalChange) !== Math.round(endTotal);
+    const yearDividendDelta = getDividendDelta(
+      baseDividendIncome,
+      startMonthIndex,
+      entry.monthIndex,
+      dividendYieldRate
+    );
+    rows.push({
+      year: entry.date.getFullYear(),
+      date: entry.endDate,
+      start: { ...yearStart },
+      end: { ...endSnapshot },
+      income: yearIncome,
+      cashIncome: yearCashIncome,
+      investmentIncome: yearInvestmentIncome,
+      expense: yearExpense,
+      netCash,
+      investmentGain: yearInvestmentGain,
+      totalChange,
+      bondMaturity: yearBondMaturityFace,
+      bondMaturityBook: yearBondMaturityBook,
+      pensionTransfer: yearPensionTransfer,
+      months: yearMonths,
+      contributions: yearContribution,
+      contributionsByCategory: { ...yearContributionByCategory },
+      gainsByCategory: { ...yearGainByCategory },
+      workMonths: yearWorkMonths,
+      retireMonths: yearRetireMonths,
+      pensionMonths: yearPensionMonths,
+      workIncome: workIncome + yearDividendDelta,
+      retireIncome: retireIncome + yearDividendDelta,
+      pensionIncome: pensionIncome + yearDividendDelta,
+      workExpense,
+      retireExpense,
+      pensionExpense,
+      mismatch,
+    });
+
+    yearStart = { ...endSnapshot };
+    yearIncome = 0;
+    yearCashIncome = 0;
+    yearInvestmentIncome = 0;
+    yearExpense = 0;
+    yearInvestmentGain = 0;
+    yearContribution = 0;
+    yearBondMaturityFace = 0;
+    yearBondMaturityBook = 0;
+    yearPensionTransfer = 0;
+    yearContributionByCategory = createCategoryAmountMap();
+    yearGainByCategory = createCategoryAmountMap();
+    yearWorkMonths = 0;
+    yearRetireMonths = 0;
+    yearPensionMonths = 0;
+    yearMonths = 0;
+  });
 
   return rows;
 }
@@ -6705,6 +6726,7 @@ function render() {
     retireIncomeTotal + ongoingIncome - retireExpenseTotal;
   const postRetirementMonthlyNetCash =
     pensionIncomeTotal + ongoingIncome - retireExpenseTotal;
+  let currentSpreadsheetRow = null;
 
   if (syncedDcContribution) {
     persistInputsToStorage();
@@ -6723,7 +6745,22 @@ function render() {
 
   if (investmentTotal) {
     if (Number.isFinite(currentAssets)) {
-      const cashReclassTotal = getCashReclassTotalYen();
+      const summaryBreakdown = getSummaryBreakdownSafe();
+      const cashBreakdown = buildCashBreakdown({
+        summaryBreakdown,
+        currentAssetsValue: currentAssets,
+        investmentTotal: investmentBalanceTotal,
+      });
+      currentSpreadsheetRow = buildCurrentSpreadsheetRow({
+        atDate: today,
+        investmentBalanceTotal,
+        investmentContributionTotal,
+        cashBreakdown,
+      });
+      const cashBase = currentSpreadsheetRow.cashBaseWithoutPoints;
+      const cashNow = currentSpreadsheetRow.cashFinal;
+      const cashReclassTotal = currentSpreadsheetRow.cashReclassTotal;
+      const derivedTotal = currentSpreadsheetRow.totalAssets;
       if (reclassStatus) {
         reclassStatus.textContent = cashReclassTotal > 0
           ? `現金から引く合計: ${yenFormatter.format(
@@ -6731,17 +6768,6 @@ function render() {
           )}`
           : "現金から引く合計: -";
       }
-      const summaryBreakdown = getSummaryBreakdownSafe();
-      const cashBreakdown = buildCashBreakdown({
-        summaryBreakdown,
-        currentAssetsValue: currentAssets,
-        investmentTotal: investmentBalanceTotal,
-      });
-      const cashBase = cashBreakdown.baseWithoutPoints;
-      const cashNow = cashBreakdown.cashFinal;
-      const derivedTotal = Number.isFinite(cashNow)
-        ? cashNow + investmentBalanceTotal
-        : null;
       if (
         currentAssetsInput &&
         Number.isFinite(derivedTotal) &&
@@ -6753,21 +6779,22 @@ function render() {
         hasAssets = roundedTotal >= 0;
         lastInvestmentBalanceTotal = investmentBalanceTotal;
       }
-      if (!MANUAL_INPUTS_ONLY) {
-        if (
-          balanceCashInput &&
-          !cashInputManual &&
-          Number.isFinite(cashNow) &&
-          !balanceCashInput.matches(":focus")
-        ) {
-          balanceCashInput.value = Math.round(cashNow);
+      if (
+        balanceCashInput &&
+        Number.isFinite(cashNow) &&
+        !balanceCashInput.matches(":focus")
+      ) {
+        const nextBaseValue = String(Math.round(cashNow));
+        if (balanceCashInput.value !== nextBaseValue) {
+          balanceCashInput.value = nextBaseValue;
+          persistInputsToStorage();
         }
       }
-      const cashAfterValue = cashNow - investmentContributionTotal;
+      const cashAfterValue = currentSpreadsheetRow.cashAfterContribution;
       const warningCashNow = cashNow;
       const warningCashAfter = cashAfterValue;
       investmentTotal.textContent = yenFormatter.format(
-        Math.round(investmentBalanceTotal)
+        Math.round(currentSpreadsheetRow.investmentBalanceTotal)
       );
       cashBalance.textContent = yenFormatter.format(
         Math.round(Number.isFinite(cashNow) ? cashNow : 0)
@@ -6782,18 +6809,25 @@ function render() {
           ? `元の現金残高: ${yenFormatter.format(Math.round(cashBase))}`
           : "元の現金残高: -";
       }
-      updateCashDetailDisplay(cashBreakdown);
+      updateCashDetailDisplay({
+        ...cashBreakdown,
+        baseWithoutPoints: currentSpreadsheetRow.cashBaseWithoutPoints,
+        points: currentSpreadsheetRow.points,
+        cashReclassTotal: currentSpreadsheetRow.cashReclassTotal,
+        cashAdjustment: currentSpreadsheetRow.cashAdjustment,
+        cashFinal: currentSpreadsheetRow.cashFinal,
+      });
       investmentContribTotal.textContent = yenFormatter.format(
-        Math.round(investmentContributionTotal)
+        Math.round(currentSpreadsheetRow.investmentContributionTotal)
       );
       if (investmentAfter) {
         investmentAfter.textContent = yenFormatter.format(
-          Math.round(investmentBalanceTotal + investmentContributionTotal)
+          Math.round(currentSpreadsheetRow.investmentAfterContribution)
         );
       }
       if (cashAfter) {
         cashAfter.textContent = yenFormatter.format(
-          Math.round(Math.max(0, cashAfterValue))
+          Math.round(Math.max(0, Number.isFinite(cashAfterValue) ? cashAfterValue : 0))
         );
       }
       if (investmentAlert) {
@@ -6807,35 +6841,32 @@ function render() {
           investmentAlert.hidden = false;
         } else if (canForecast) {
           const simulationContext = getSimulationContext();
-          const initial = buildInitialCategories(summaryBreakdown, currentAssets);
-          const categories = {
-            cash: initial.cash,
-            stocks: initial.stocks,
-            funds: initial.funds,
-            bonds: initial.bonds,
-            insurance: initial.insurance,
-            dc: initial.dc,
-            usd: initial.usd,
-            other: initial.other,
-          };
-          negativeRow = findNegativeCashMonthDetailed({
-            startDate: today,
-            monthsRemaining,
-            annualRate,
-            categoryRates: simulationContext?.categoryRates,
-            retirementAge: monthIndex(retirementDate),
-            retirementIncomeEndAge: monthIndex(retirementIncomeEndDate),
-            monthlyNetCash,
-            retirementMonthlyNetCash,
-            postRetirementMonthlyNetCash,
-            baseDividendIncome,
-            dividendYieldRate,
-            contributionSchedule,
-            categories,
-            bondMaturities: simulationContext?.bondMaturities,
-            usdRate: simulationContext?.usdRate,
-            pensionPlanState: simulationContext?.pensionPlanState,
-          });
+          if (simulationContext) {
+            const categories = {
+              ...simulationContext.categories,
+              cash: Number.isFinite(cashNow)
+                ? cashNow
+                : simulationContext.categories.cash,
+            };
+            negativeRow = findNegativeCashMonthDetailed({
+              startDate: today,
+              monthsRemaining,
+              annualRate,
+              categoryRates: simulationContext.categoryRates,
+              retirementAge: monthIndex(retirementDate),
+              retirementIncomeEndAge: monthIndex(retirementIncomeEndDate),
+              monthlyNetCash,
+              retirementMonthlyNetCash,
+              postRetirementMonthlyNetCash,
+              baseDividendIncome,
+              dividendYieldRate,
+              contributionSchedule,
+              categories,
+              bondMaturities: simulationContext.bondMaturities,
+              usdRate: simulationContext.usdRate,
+              pensionPlanState: simulationContext.pensionPlanState,
+            });
+          }
         }
         if (warningCashNow < 0) {
           investmentAlert.textContent =
@@ -6905,6 +6936,14 @@ function render() {
   retirementIncomeEndDate = addYears(birthDate, retirementIncomeEndAgeYears);
 
   const context = getSimulationContext();
+  const simulationCategories = context?.categories
+    ? {
+        ...context.categories,
+        cash: Number.isFinite(currentSpreadsheetRow?.cashFinal)
+          ? currentSpreadsheetRow.cashFinal
+          : context.categories.cash,
+      }
+    : null;
   const { assets } = context
       ? simulateToAge100Detailed({
         startDate: today,
@@ -6917,7 +6956,7 @@ function render() {
         baseDividendIncome,
         dividendYieldRate,
         contributionSchedule,
-        categories: context.categories,
+        categories: simulationCategories,
         categoryRates: context.categoryRates,
         bondMaturities: context.bondMaturities,
         usdRate: context.usdRate,
