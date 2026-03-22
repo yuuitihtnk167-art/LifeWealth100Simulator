@@ -7,19 +7,7 @@
       "command": "py",
       "args": ["-m", "http.server", "8080"],
       "isBackground": true,
-      "problemMatcher": {
-        "owner": "custom",
-        "pattern": {
-          "regexp": "^(.*)$",
-          "file": 1,
-          "message": 1
-        },
-        "background": {
-          "activeOnStart": true,
-          "beginsPattern": "Serving HTTP on",
-          "endsPattern": "Serving HTTP on"
-        }
-      }
+      "problemMatcher": []
     }
   ]
 }
